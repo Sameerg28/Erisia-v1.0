@@ -163,9 +163,10 @@ class QuantitativeEngine:
         except (TypeError, ValueError):
             return 0.0
 
-    def calculate_indicators(self, df: pd.DataFrame) -> dict[str, float]:
+    def enrich_with_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Return a copy of the dataframe enriched with technical indicator columns."""
         if df.empty:
-            return {}
+            return df.copy()
 
         try:
             data = df.copy()
@@ -173,6 +174,11 @@ class QuantitativeEngine:
             high = pd.to_numeric(data["High"], errors="coerce")
             low = pd.to_numeric(data["Low"], errors="coerce")
             volume = pd.to_numeric(data["Volume"], errors="coerce")
+            data["Close"] = close
+            data["High"] = high
+            data["Low"] = low
+            data["Volume"] = volume
+            data["Bar_Count"] = np.arange(1, len(data) + 1, dtype=float)
 
             data["SMA_5"] = close.rolling(window=5, min_periods=5).mean()
             data["SMA_14"] = close.rolling(window=14, min_periods=14).mean()
@@ -202,10 +208,10 @@ class QuantitativeEngine:
             # ═══════════════════════════════════════════════
             _period = 14
 
-            _high  = df["High"].astype(float).values
-            _low   = df["Low"].astype(float).values
-            _close = df["Close"].astype(float).values
-            _n     = len(_high)
+            _high = high.to_numpy(dtype=float)
+            _low = low.to_numpy(dtype=float)
+            _close = close.to_numpy(dtype=float)
+            _n = len(_high)
 
             # True Range
             _tr = np.zeros(_n)
@@ -238,6 +244,49 @@ class QuantitativeEngine:
                     out[_j] = out[_j - 1] * k + arr[_j]
                 return out
 
+            def _expanding_rank_pct(series: pd.Series) -> pd.Series:
+                values = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+                percentiles = np.full(len(values), np.nan, dtype=float)
+                finite_values = sorted({float(value) for value in values if np.isfinite(value)})
+                if not finite_values:
+                    return pd.Series(percentiles, index=series.index, dtype=float)
+
+                value_to_index = {value: index + 1 for index, value in enumerate(finite_values)}
+                bit = np.zeros(len(finite_values) + 1, dtype=np.int64)
+                counts = np.zeros(len(finite_values) + 1, dtype=np.int64)
+                total = 0
+
+                def _update(bit_index: int) -> None:
+                    while bit_index < len(bit):
+                        bit[bit_index] += 1
+                        bit_index += bit_index & -bit_index
+
+                def _query(bit_index: int) -> int:
+                    result = 0
+                    while bit_index > 0:
+                        result += int(bit[bit_index])
+                        bit_index -= bit_index & -bit_index
+                    return result
+
+                for value_index, value in enumerate(values):
+                    if not np.isfinite(value):
+                        continue
+                    compressed_index = value_to_index[float(value)]
+                    total += 1
+                    counts[compressed_index] += 1
+                    _update(compressed_index)
+
+                    if total <= 1:
+                        percentiles[value_index] = 0.5
+                        continue
+
+                    lower_count = _query(compressed_index - 1)
+                    same_value_count = counts[compressed_index]
+                    average_rank = lower_count + ((same_value_count + 1) / 2.0)
+                    percentiles[value_index] = average_rank / total
+
+                return pd.Series(percentiles, index=series.index, dtype=float)
+
             _sm_tr   = _ws(_tr,       _period)
             _sm_pdm  = _ws(_plus_dm,  _period)
             _sm_mdm  = _ws(_minus_dm, _period)
@@ -257,18 +306,9 @@ class QuantitativeEngine:
             _dx = np.zeros(_n)
             np.divide(100.0 * _di_diff, _di_sum, out=_dx, where=_di_sum > 0)
 
-            # ADX = Wilder's smooth of DX (divide by period to get average)
-            _adx_arr = _ws(_dx, _period) / _period
-
-            # Extract final values
-            adx_val      = float(_adx_arr[-1])  if _n > 0 else 0.0
-            plus_di_val  = float(_plus_di_arr[-1])  if _n > 0 else 0.0
-            minus_di_val = float(_minus_di_arr[-1]) if _n > 0 else 0.0
-
-            # Sanity clamp
-            adx_val      = max(0.0, min(100.0, adx_val))
-            plus_di_val  = max(0.0, min(100.0, plus_di_val))
-            minus_di_val = max(0.0, min(100.0, minus_di_val))
+            data["ADX_14"] = np.clip(_ws(_dx, _period) / _period, 0.0, 100.0)
+            data["Plus_DI"] = np.clip(_plus_di_arr, 0.0, 100.0)
+            data["Minus_DI"] = np.clip(_minus_di_arr, 0.0, 100.0)
 
             bb_mid = close.rolling(20).mean()
             bb_std = close.rolling(20).std(ddof=0)
@@ -279,37 +319,87 @@ class QuantitativeEngine:
             data["BB_Lower"] = bb_lower
             data["BB_Width"] = (bb_upper - bb_lower) / bb_mid.replace(0.0, np.nan)
             data["BB_Pct_B"] = (close - bb_lower) / (bb_upper - bb_lower).replace(0.0, np.nan)
+            data["BB_Width_Pct"] = _expanding_rank_pct(data["BB_Width"])
 
             obv = (np.sign(close.diff()) * volume).fillna(0.0).cumsum()
             obv_ema = obv.ewm(span=21, adjust=False).mean()
             data["OBV"] = obv
             data["OBV_Trend"] = np.where(obv > obv_ema, 1.0, np.where(obv < obv_ema, -1.0, 0.0))
 
-            last = data.iloc[-1]
-            return {
-                "close": self._to_float(last.get("Close")),
-                "volume_surge": self._to_float(last.get("Volume_Surge")),
-                "sma_5": self._to_float(last.get("SMA_5")),
-                "sma_14": self._to_float(last.get("SMA_14")),
-                "rsi_14": self._to_float(last.get("RSI_14")),
-                "ema_9": self._to_float(last.get("EMA_9")),
-                "ema_21": self._to_float(last.get("EMA_21")),
-                "macd_line": self._to_float(last.get("MACD_Line")),
-                "macd_signal": self._to_float(last.get("MACD_Signal")),
-                "macd_histogram": self._to_float(last.get("MACD_Histogram")),
-                "atr_14": self._to_float(last.get("ATR_14")),
-                "adx_14": adx_val,
-                "plus_di": plus_di_val,
-                "minus_di": minus_di_val,
-                "bb_upper": self._to_float(last.get("BB_Upper")),
-                "bb_lower": self._to_float(last.get("BB_Lower")),
-                "bb_mid": self._to_float(last.get("BB_Mid")),
-                "bb_width": self._to_float(last.get("BB_Width")),
-                "bb_pct_b": self._to_float(last.get("BB_Pct_B")),
-                "obv": self._to_float(last.get("OBV")),
-                "obv_trend": self._to_float(last.get("OBV_Trend")),
-            }
+            return data
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return df.copy()
+
+    def _row_to_metrics_dict(self, row: pd.Series) -> dict[str, float]:
+        """Convert an enriched dataframe row into the legacy metrics payload."""
+        required_columns = (
+            "Close",
+            "Volume_Surge",
+            "SMA_5",
+            "SMA_14",
+            "RSI_14",
+            "EMA_9",
+            "EMA_21",
+            "MACD_Line",
+            "MACD_Signal",
+            "MACD_Histogram",
+            "ATR_14",
+            "ADX_14",
+            "Plus_DI",
+            "Minus_DI",
+            "BB_Upper",
+            "BB_Lower",
+            "BB_Mid",
+            "BB_Width",
+            "BB_Pct_B",
+            "BB_Width_Pct",
+            "OBV",
+            "OBV_Trend",
+            "Bar_Count",
+        )
+        if any(column not in row.index for column in required_columns):
+            return {}
+
+        return {
+            "close": self._to_float(row.get("Close")),
+            "volume_surge": self._to_float(row.get("Volume_Surge")),
+            "sma_5": self._to_float(row.get("SMA_5")),
+            "sma_14": self._to_float(row.get("SMA_14")),
+            "rsi_14": self._to_float(row.get("RSI_14")),
+            "ema_9": self._to_float(row.get("EMA_9")),
+            "ema_21": self._to_float(row.get("EMA_21")),
+            "macd_line": self._to_float(row.get("MACD_Line")),
+            "macd_signal": self._to_float(row.get("MACD_Signal")),
+            "macd_histogram": self._to_float(row.get("MACD_Histogram")),
+            "atr_14": self._to_float(row.get("ATR_14")),
+            "adx_14": self._to_float(row.get("ADX_14")),
+            "plus_di": self._to_float(row.get("Plus_DI")),
+            "minus_di": self._to_float(row.get("Minus_DI")),
+            "bb_upper": self._to_float(row.get("BB_Upper")),
+            "bb_lower": self._to_float(row.get("BB_Lower")),
+            "bb_mid": self._to_float(row.get("BB_Mid")),
+            "bb_width": self._to_float(row.get("BB_Width")),
+            "bb_pct_b": self._to_float(row.get("BB_Pct_B")),
+            "bb_width_pct": (
+                0.5 if pd.isna(row.get("BB_Width_Pct")) else self._to_float(row.get("BB_Width_Pct"))
+            ),
+            "obv": self._to_float(row.get("OBV")),
+            "obv_trend": self._to_float(row.get("OBV_Trend")),
+            "bar_count": self._to_float(row.get("Bar_Count")),
+        }
+
+    def calculate_indicators(self, df: pd.DataFrame) -> dict[str, float]:
+        """Legacy wrapper that enriches the dataframe and returns the latest metrics."""
+        if df.empty:
+            return {}
+
+        try:
+            enriched = self.enrich_with_indicators(df)
+            if enriched.empty:
+                return {}
+            last_row = enriched.iloc[-1]
+            return self._row_to_metrics_dict(last_row)
+        except (IndexError, KeyError, TypeError, ValueError, ZeroDivisionError):
             return {}
 
 def configure_logger() -> logging.Logger:

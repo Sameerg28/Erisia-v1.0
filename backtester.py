@@ -332,19 +332,20 @@ class SignalLayer:
         self._ensure_cache_table()
 
     def generate_signals(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-        """Append signal, confidence, and reasoning columns using a rolling window."""
+        """Append signal, confidence, and reasoning columns using precomputed indicators."""
         signal_frame = df.copy()
         signal_frame["signal"] = SignalAction.HOLD.value
         signal_frame["confidence"] = NO_SIGNAL_CONFIDENCE
         signal_frame["reasoning"] = ""
+        signal_frame = self.quant_engine.enrich_with_indicators(signal_frame)
 
         for bar_index in range(SIGNAL_WARMUP_BARS, len(signal_frame)):
-            window = signal_frame.iloc[: bar_index + 1]
             bar_timestamp = signal_frame.index[bar_index]
             date_str = _index_to_date_string(bar_timestamp)
 
             try:
-                metrics = self.quant_engine.calculate_indicators(window)
+                current_row = signal_frame.iloc[bar_index]
+                metrics = self.quant_engine._row_to_metrics_dict(current_row)
             except (AttributeError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
                 self.logger.warning("Indicator computation failed for %s on %s: %s", ticker.upper(), date_str, exc)
                 signal_frame.at[bar_timestamp, "signal"] = SignalAction.HOLD.value
@@ -360,7 +361,12 @@ class SignalLayer:
                 continue
 
             self._metrics_cache[date_str] = metrics
-            regime_estimate = self._estimate_bar_regime(window, metrics)
+            # Security: Prevent OOM Memory Leak (Cap at 5000 bars)
+            if len(self._metrics_cache) > 5000:
+                # Remove the oldest key (standard dicts maintain insertion order in Python 3.7+)
+                oldest_key = next(iter(self._metrics_cache))
+                del self._metrics_cache[oldest_key]
+            regime_estimate = self._estimate_bar_regime(metrics)
             quant_action, quant_confidence = self._determine_quant_signal(
                 metrics, regime_estimate
             )
@@ -412,33 +418,28 @@ class SignalLayer:
                     );
                     """
                 )
+                connection.execute("CREATE INDEX IF NOT EXISTS idx_cache_ticker_date ON llm_signal_cache(ticker, date_str);")
+                connection.execute("CREATE INDEX IF NOT EXISTS idx_cache_created ON llm_signal_cache(created_at);")
                 connection.commit()
         except sqlite3.Error as exc:
             self.logger.error("Failed to ensure llm_signal_cache table: %s", exc)
 
-    def _estimate_bar_regime(self, window: pd.DataFrame, metrics: dict[str, Any]) -> str:
+    def _estimate_bar_regime(self, metrics: dict[str, Any]) -> str:
         """ADX+BB+EMA regime classifier. Requires 30+ bars."""
-        if len(window) < SIGNAL_WARMUP_BARS:
+        if _coerce_int(metrics.get("bar_count")) < SIGNAL_WARMUP_BARS:
             return MarketRegime.UNKNOWN.value
 
         adx = _coerce_float(metrics.get("adx_14"))
         bb_width = _coerce_float(metrics.get("bb_width"))
+        bb_width_pct = _coerce_float(metrics.get("bb_width_pct"), default=0.5)
         ema_9 = _coerce_float(metrics.get("ema_9"))
         ema_21 = _coerce_float(metrics.get("ema_21"))
         plus_di = _coerce_float(metrics.get("plus_di"))
         minus_di = _coerce_float(metrics.get("minus_di"))
-
-        close = pd.to_numeric(window["Close"], errors="coerce")
-        bb_mid_series = close.rolling(20).mean()
-        bb_std_series = close.rolling(20).std(ddof=0)
-        bb_width_series = (
-            ((bb_mid_series + 2 * bb_std_series) - (bb_mid_series - 2 * bb_std_series))
-            / bb_mid_series.replace(0, np.nan)
-        ).dropna()
-
-        bb_width_pct = float(bb_width_series.rank(pct=True).iloc[-1]) if len(bb_width_series) > 1 else 0.5
         if not math.isfinite(bb_width):
             bb_width = 0.0
+        if not math.isfinite(bb_width_pct):
+            bb_width_pct = 0.5
 
         if adx >= ADX_TREND_THRESHOLD:
             if plus_di > minus_di and ema_9 > ema_21:
@@ -719,14 +720,22 @@ class SignalLayer:
         cache_key = self._build_cache_key(ticker, date_str, metrics)
         cached_signal = self._load_cached_signal(cache_key)
         if cached_signal is not None:
-            return (
-                str(cached_signal["action"]),
-                _coerce_int(cached_signal["confidence"]),
-                str(cached_signal["reasoning"]),
-            )
+            if self._validate_llm_signal(cached_signal):
+                return (
+                    str(cached_signal["action"]),
+                    _coerce_int(cached_signal["confidence"]),
+                    str(cached_signal["reasoning"]),
+                )
+            self.logger.warning("Discarding invalid cached LLM payload for %s on %s.", ticker, date_str)
 
         llm_signal = self._invoke_war_room(metrics)
-        if llm_signal is None or self._is_failed_llm_response(llm_signal):
+        if llm_signal is None:
+            self.logger.error("LLM pipeline failed for %s on %s; reverting to deterministic quant signal.", ticker, date_str)
+            return quant_action, quant_confidence, FALLBACK_REASON
+        if not self._validate_llm_signal(llm_signal):
+            self.logger.error("Invalid LLM payload for %s on %s; reverting to deterministic quant signal.", ticker, date_str)
+            return quant_action, quant_confidence, FALLBACK_REASON
+        if self._is_failed_llm_response(llm_signal):
             self.logger.error("LLM pipeline failed for %s on %s; reverting to deterministic quant signal.", ticker, date_str)
             return quant_action, quant_confidence, FALLBACK_REASON
 
@@ -823,6 +832,27 @@ class SignalLayer:
             self.logger.error("War Room returned non-dict response: %s", type(response).__name__)
             return None
         return cast(dict[str, Any], response)
+
+    def _validate_llm_signal(self, signal: dict[str, Any]) -> bool:
+        """Cognitive Firewall: Validates LLM payload schema and bounds."""
+        if not isinstance(signal, dict):
+            return False
+
+        required_keys = {"action", "confidence", "reasoning"}
+        if not required_keys.issubset(signal.keys()):
+            return False
+
+        if signal["action"] not in {"BUY", "SELL", "HOLD"}:
+            return False
+
+        try:
+            conf = int(signal["confidence"])
+            if conf < 0 or conf > 100:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        return True
 
     def _get_war_room_callable(self) -> tuple[Any, str] | None:
         """Lazily resolve the War Room class and supported inference method."""
@@ -1552,6 +1582,8 @@ def _ensure_database_schema(db_path: Path, logger: logging.Logger) -> None:
                 );
                 """
             )
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_cache_ticker_date ON llm_signal_cache(ticker, date_str);")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_cache_created ON llm_signal_cache(created_at);")
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS backtest_runs (

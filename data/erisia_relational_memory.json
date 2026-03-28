@@ -611,6 +611,33 @@
         },
         {
             "id": "The Crucible"
+        },
+        {
+            "id": "TSLA: 35.71%"
+        },
+        {
+            "id": "TSLA: -1.718"
+        },
+        {
+            "id": "TSLA: 0.944"
+        },
+        {
+            "id": "TSLA"
+        },
+        {
+            "id": "QUANT_ONLY strategy (win_rate=36%)"
+        },
+        {
+            "id": "TSLA trading"
+        },
+        {
+            "id": "long entry losses on TSLA"
+        },
+        {
+            "id": "BULL"
+        },
+        {
+            "id": "TSLA QUANT_ONLY"
         }
     ],
     "edges": [
@@ -1280,6 +1307,21 @@
             "target": "NVDA: 1.844"
         },
         {
+            "relation": "achieved win rate on",
+            "source": "Oracle",
+            "target": "TSLA: 35.71%"
+        },
+        {
+            "relation": "sharpe ratio on",
+            "source": "Oracle",
+            "target": "TSLA: -1.718"
+        },
+        {
+            "relation": "profit factor on",
+            "source": "Oracle",
+            "target": "TSLA: 0.944"
+        },
+        {
             "relation": "goal_seeded_by",
             "source": "Sandbox Setup Revalidation",
             "target": "Current Curiosity Mission"
@@ -1410,14 +1452,29 @@
             "target": "NVDA trading"
         },
         {
+            "relation": "causes_losses_for",
+            "source": "BEAR",
+            "target": "TSLA trading"
+        },
+        {
             "relation": "causes",
             "source": "BEAR regime",
             "target": "long entry losses on NVDA"
         },
         {
+            "relation": "causes",
+            "source": "BEAR regime",
+            "target": "long entry losses on TSLA"
+        },
+        {
             "relation": "causes_losses_for",
             "source": "SIDEWAYS",
             "target": "NVDA trading"
+        },
+        {
+            "relation": "is_favorable_regime_for",
+            "source": "SIDEWAYS",
+            "target": "TSLA trading"
         },
         {
             "relation": "causes",
@@ -1488,6 +1545,21 @@
             "relation": "was_seeded_from",
             "source": "Analyze `forge_pending_skill` tool and its dependencies",
             "target": "goal_stack"
+        },
+        {
+            "relation": "underperforms_in",
+            "source": "TSLA",
+            "target": "QUANT_ONLY strategy (win_rate=36%)"
+        },
+        {
+            "relation": "causes_losses_for",
+            "source": "BULL",
+            "target": "TSLA trading"
+        },
+        {
+            "relation": "causes",
+            "source": "TSLA QUANT_ONLY",
+            "target": "negative risk-adjusted returns"
         }
     ]
 }
