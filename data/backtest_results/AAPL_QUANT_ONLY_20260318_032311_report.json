@@ -1,0 +1,80 @@
+{
+  "ticker": "AAPL",
+  "mode": "QUANT_ONLY",
+  "total_trades": 30,
+  "win_rate": 0.43333333333333335,
+  "avg_pnl_per_trade": 12.862757692017658,
+  "total_pnl": 385.8827307605534,
+  "sharpe_ratio": -3.211822781484316,
+  "max_drawdown": -0.016982157282480908,
+  "max_drawdown_duration": 324,
+  "profit_factor": 1.0935782775481018,
+  "avg_hold_bars": 7.133333333333334,
+  "regime_breakdown": {
+    "VOLATILE": {
+      "trades": 11,
+      "win_rate": 0.2727272727272727,
+      "avg_pnl": -71.6045777715818
+    },
+    "SIDEWAYS": {
+      "trades": 8,
+      "win_rate": 0.75,
+      "avg_pnl": 169.44203770151626
+    },
+    "BULL": {
+      "trades": 11,
+      "win_rate": 0.36363636363636365,
+      "avg_pnl": -16.545746851290957
+    },
+    "BEAR": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    }
+  },
+  "exit_reason_breakdown": {
+    "SIGNAL": 7,
+    "STOP_LOSS": 7,
+    "TAKE_PROFIT": 11,
+    "MAX_HOLD": 5
+  },
+  "best_trade": {
+    "ticker": "AAPL",
+    "entry_date": "2024-06-10",
+    "exit_date": "2024-06-13",
+    "entry_price": 196.9984438934326,
+    "exit_price": 214.6326354904175,
+    "shares": 51.51650722388926,
+    "pnl": 887.246163318865,
+    "pnl_pct": 0.08733751811636621,
+    "signal": "BUY",
+    "confidence": 68,
+    "reasoning": "",
+    "regime": "SIDEWAYS",
+    "hold_bars": 3,
+    "exit_reason": "TAKE_PROFIT"
+  },
+  "worst_trade": {
+    "ticker": "AAPL",
+    "entry_date": "2023-07-31",
+    "exit_date": "2023-08-04",
+    "entry_price": 196.15802755737303,
+    "exit_price": 185.4272442703247,
+    "shares": 69.61715074035122,
+    "pnl": -773.6114370456107,
+    "pnl_pct": -0.056593489595206534,
+    "signal": "BUY",
+    "confidence": 68,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 4,
+    "exit_reason": "SIGNAL"
+  },
+  "erisia_memory_note": "Oracle's QUANT_ONLY strategy on AAPL achieved a 43.33% win rate with a Sharpe of -3.21. She performed best in SIDEWAYS regimes and worst in VOLATILE regimes. Max drawdown of 1.70% suggests contained downside pressure during the tested window.",
+  "generated_at": "2026-03-18T03:23:11Z"
+}

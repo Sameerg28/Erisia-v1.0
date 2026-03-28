@@ -1,0 +1,80 @@
+{
+  "ticker": "NVDA",
+  "mode": "QUANT_ONLY",
+  "total_trades": 57,
+  "win_rate": 0.45614035087719296,
+  "avg_pnl_per_trade": 139.05116614163032,
+  "total_pnl": 7925.91647007296,
+  "sharpe_ratio": -0.3838473144079504,
+  "max_drawdown": -0.03661697185126816,
+  "max_drawdown_duration": 227,
+  "profit_factor": 1.6069491744179516,
+  "avg_hold_bars": 3.8596491228070176,
+  "regime_breakdown": {
+    "VOLATILE": {
+      "trades": 25,
+      "win_rate": 0.4,
+      "avg_pnl": 17.641522543398388
+    },
+    "BEAR": {
+      "trades": 1,
+      "win_rate": 1.0,
+      "avg_pnl": 123.40768927389945
+    },
+    "SIDEWAYS": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -436.87596977822795
+    },
+    "BULL": {
+      "trades": 30,
+      "win_rate": 0.5,
+      "avg_pnl": 259.9448895664099
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    }
+  },
+  "exit_reason_breakdown": {
+    "SIGNAL": 7,
+    "STOP_LOSS": 23,
+    "TAKE_PROFIT": 26,
+    "MAX_HOLD": 1
+  },
+  "best_trade": {
+    "ticker": "NVDA",
+    "entry_date": "2023-05-03",
+    "exit_date": "2023-05-26",
+    "entry_price": 27.853920152664184,
+    "exit_price": 37.87105438995361,
+    "shares": 572.0902656814441,
+    "pnl": 5693.1043690296065,
+    "pnl_pct": 0.35691449320109336,
+    "signal": "BUY",
+    "confidence": 76,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 17,
+    "exit_reason": "TAKE_PROFIT"
+  },
+  "worst_trade": {
+    "ticker": "NVDA",
+    "entry_date": "2024-06-20",
+    "exit_date": "2024-06-21",
+    "entry_price": 139.86990305328368,
+    "exit_price": 127.05644274520874,
+    "shares": 107.79049772490045,
+    "pnl": -1409.9413878551622,
+    "pnl_pct": -0.0934248115519239,
+    "signal": "BUY",
+    "confidence": 68,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 1,
+    "exit_reason": "STOP_LOSS"
+  },
+  "erisia_memory_note": "Oracle's QUANT_ONLY strategy on NVDA achieved a 45.61% win rate with a Sharpe of -0.38. She performed best in BULL regimes and worst in SIDEWAYS regimes. Max drawdown of 3.66% suggests contained downside pressure during the tested window.",
+  "generated_at": "2026-03-18T03:24:21Z"
+}

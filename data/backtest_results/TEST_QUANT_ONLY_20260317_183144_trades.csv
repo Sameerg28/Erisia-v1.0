@@ -1,0 +1,3 @@
+ticker,entry_date,exit_date,entry_price,exit_price,shares,pnl,pnl_pct,signal,confidence,reasoning,regime,hold_bars,exit_reason
+TEST,2024-01-03,2024-01-09,103.05149999999999,111.944,155.10706767020363,1345.9422776899974,0.08412139235562481,BUY,80,test-buy,BULL,4,SIGNAL
+SUMMARY,,,0.0,0.0,1.0,1345.9422776900028,1.0,ALL,1,avg_pnl_per_trade=1345.94; sharpe=10.1411; profit_factor=inf; avg_hold_bars=4.00,ALL,4.0,SUMMARY

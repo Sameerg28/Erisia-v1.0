@@ -1,0 +1,80 @@
+{
+  "ticker": "CSV",
+  "mode": "QUANT_ONLY",
+  "total_trades": 6,
+  "win_rate": 0.5,
+  "avg_pnl_per_trade": 425.6244335331203,
+  "total_pnl": 2553.746601198727,
+  "sharpe_ratio": -2.5365790134240735,
+  "max_drawdown": -0.013946340002246142,
+  "max_drawdown_duration": 231,
+  "profit_factor": 2.831123148286536,
+  "avg_hold_bars": 9.666666666666666,
+  "regime_breakdown": {
+    "BULL": {
+      "trades": 5,
+      "win_rate": 0.6,
+      "avg_pnl": 586.2215148688589
+    },
+    "SIDEWAYS": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -377.36097314557264
+    },
+    "BEAR": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "VOLATILE": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    }
+  },
+  "exit_reason_breakdown": {
+    "SIGNAL": 0,
+    "STOP_LOSS": 3,
+    "TAKE_PROFIT": 2,
+    "MAX_HOLD": 1
+  },
+  "best_trade": {
+    "ticker": "CSV",
+    "entry_date": "2024-10-21",
+    "exit_date": "2024-11-01",
+    "entry_price": 32.27612832069397,
+    "exit_price": 37.461259542465214,
+    "shares": 361.5680045790838,
+    "pnl": 1849.5627411622954,
+    "pnl_pct": 0.15833012868155097,
+    "signal": "BUY",
+    "confidence": 58,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 9,
+    "exit_reason": "TAKE_PROFIT"
+  },
+  "worst_trade": {
+    "ticker": "CSV",
+    "entry_date": "2023-08-30",
+    "exit_date": "2023-09-06",
+    "entry_price": 31.43571007633209,
+    "exit_price": 29.88504961872101,
+    "shares": 368.6384548105529,
+    "pnl": -594.2382651313656,
+    "pnl_pct": -0.05122743664925565,
+    "signal": "BUY",
+    "confidence": 58,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 4,
+    "exit_reason": "STOP_LOSS"
+  },
+  "erisia_memory_note": "Oracle's QUANT_ONLY strategy on CSV achieved a 50.00% win rate with a Sharpe of -2.54. She performed best in BULL regimes and worst in SIDEWAYS regimes. Max drawdown of 1.39% suggests contained downside pressure during the tested window.",
+  "generated_at": "2026-03-17T19:09:11Z"
+}

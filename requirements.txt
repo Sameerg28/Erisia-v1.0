@@ -1,0 +1,22 @@
+python-dotenv
+openai
+groq
+tavily-python
+chromadb
+docker
+networkx
+psutil
+pyautogui
+Pillow
+requests
+schedule
+feedparser
+pandas
+yfinance
+# v0.2 additions
+httpx                    # Faster Ollama health checks (optional)
+# Optional: pip install these for specific features
+# python-telegram-bot    # Telegram channel (Phase 5)
+# fastapi                # REST API server (Phase 5)
+# uvicorn                # ASGI server for FastAPI (Phase 5)
+# mcp                    # Model Context Protocol server (Phase 6)
