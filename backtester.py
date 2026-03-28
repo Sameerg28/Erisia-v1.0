@@ -11,9 +11,7 @@ import hashlib
 import json
 import logging
 import math
-import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pathlib import Path
 import sqlite3
 from typing import Any, Sequence, cast
@@ -25,12 +23,8 @@ import yfinance as yf
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_DIR = PROJECT_ROOT / "src"
-for _path_entry in (PROJECT_ROOT, SRC_DIR):
-    _path_entry_str = str(_path_entry)
-    if _path_entry_str not in sys.path:
-        sys.path.insert(0, _path_entry_str)
 
-from oracle.oracle_math_engine import QuantitativeEngine
+from src.oracle.oracle_math_engine import QuantitativeEngine
 
 LOGGER_NAME = "erisia.backtester"
 DEFAULT_DATABASE_NAME = "oracle_memory.db"
@@ -1664,7 +1658,19 @@ def _write_trade_log_csv(output_directory: Path, filename_stem: str, trades: lis
     }
 
     try:
-        with output_path.open("w", newline="", encoding="utf-8") as file_handle:
+        # Security: Prevent Path Traversal
+        try:
+            resolved_output = output_path.resolve()
+            resolved_parent = output_directory.resolve()
+            resolved_output.relative_to(resolved_parent)
+        except ValueError:
+            logger.error("CRITICAL: Path traversal attempt blocked.")
+            return None
+        except Exception as e:
+            logger.error(f"Path resolution failed: {e}")
+            return None
+
+        with resolved_output.open("w", newline="", encoding="utf-8") as file_handle:
             writer = csv.DictWriter(file_handle, fieldnames=field_names)
             writer.writeheader()
             for trade in trades:
@@ -1674,7 +1680,7 @@ def _write_trade_log_csv(output_directory: Path, filename_stem: str, trades: lis
         logger.error("Failed to write trade log CSV %s: %s", output_path, exc)
         return None
 
-    return output_path
+    return resolved_output
 
 
 def _select_best_and_worst_regimes(report: BacktestReport) -> tuple[str, str]:
@@ -2510,4 +2516,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    for _path_entry in (PROJECT_ROOT, SRC_DIR):
+        _path_entry_str = str(_path_entry)
+        if _path_entry_str not in sys.path:
+            sys.path.insert(0, _path_entry_str)
     raise SystemExit(main())

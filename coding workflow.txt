@@ -1,0 +1,17 @@
+(Copilot ➔ Planner)
+
+Prompt to Planner: "Here is the current state of Erisia. Here is the code output from the Google Antigravity agent. Here is GitHub Copilot's audit of that code, noting 3 security flaws. Act as the Senior Architect. Do not write the code. Write the step-by-step 'Execution Contract' to fix these 3 flaws."
+
+____________________________________________________________________________________________________________________________
+
+(Planner ➔ Execution Ring)
+
+Prompt to Coding Agent: "Execute this exact contract. Do not deviate. Validate syntax after every file change."
+
+____________________________________________________________________________________________________________________________
+
+(Execution Ring ➔ Copilot)
+
+Prompt to Copilot: "Review these Git diffs against the original Execution Contract. Did the coding agent miss anything? Are there any syntax errors or regressions?"
+
+____________________________________________________________________________________________________________________________
