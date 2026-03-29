@@ -14,6 +14,7 @@ import math
 import sys
 from pathlib import Path
 import sqlite3
+import time
 from typing import Any, Sequence, cast
 import uuid
 
@@ -24,6 +25,14 @@ import yfinance as yf
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_DIR = PROJECT_ROOT / "src"
 
+for _path_entry in (PROJECT_ROOT, SRC_DIR):
+    _path_entry_str = str(_path_entry)
+    if _path_entry_str not in sys.path:
+        sys.path.insert(0, _path_entry_str)
+
+from oracle.portfolio_account import PortfolioAccount
+from oracle.position_manager import PositionDirection, PositionManager, PositionState
+from oracle.trade_recorder import TradeRecord, TradeRecorder
 from src.oracle.oracle_math_engine import QuantitativeEngine
 
 LOGGER_NAME = "erisia.backtester"
@@ -117,12 +126,6 @@ class SignalAction(StrEnum):
     HOLD = "HOLD"
 
 
-class PositionDirection(StrEnum):
-    LONG = "LONG"
-    SHORT = "SHORT"
-    FLAT = "FLAT"
-
-
 class MarketRegime(StrEnum):
     BULL = "BULL"
     BEAR = "BEAR"
@@ -136,25 +139,6 @@ class ExitReason(StrEnum):
     STOP_LOSS = "STOP_LOSS"
     TAKE_PROFIT = "TAKE_PROFIT"
     MAX_HOLD = "MAX_HOLD"
-
-
-@dataclass(slots=True)
-class TradeRecord:
-    ticker: str
-    entry_date: str
-    exit_date: str
-    entry_price: float
-    exit_price: float
-    shares: float
-    pnl: float
-    pnl_pct: float
-    signal: str
-    confidence: int
-    reasoning: str
-    regime: str
-    hold_bars: int
-    exit_reason: str
-    direction: str
 
 
 @dataclass(slots=True)
@@ -217,21 +201,6 @@ class PendingExit:
     exit_reason: ExitReason
 
 
-@dataclass(slots=True)
-class PositionState:
-    ticker: str
-    entry_index: int
-    entry_date: str
-    entry_price: float
-    shares: float
-    entry_cost: float
-    signal: str
-    confidence: int
-    reasoning: str
-    regime: str
-    direction: str
-
-
 def classify_signal_intent(
     signal: str,
     regime: str,
@@ -273,23 +242,44 @@ class DataLayer:
 
     def load(self) -> pd.DataFrame:
         """Load and clean OHLCV history from yfinance."""
-        try:
-            raw_frame: pd.DataFrame | None = yf.download(
-                self.ticker,
-                start=self.start,
-                end=self.end,
-                interval=self.interval,
-                progress=False,
-                auto_adjust=False,
-            )
-        except (RuntimeError, TypeError, ValueError) as exc:
-            self.logger.error("yfinance download failed for %s: %s", self.ticker, exc)
-            raise ValueError(f"Failed to load history for {self.ticker}") from exc
+        # API Circuit Breaker with Exponential Backoff
+        max_retries = 3
+        base_delay = 2.0  # seconds
+        raw_frame: pd.DataFrame | None = None
 
-        if raw_frame is None or (isinstance(raw_frame, pd.DataFrame) and raw_frame.empty):
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    self.logger.info("Retrying yfinance download for %s (Attempt %d/%d)...", self.ticker, attempt + 1, max_retries)
+                    time.sleep(base_delay * (2 ** (attempt - 1)))
+
+                raw_frame = yf.download(
+                    self.ticker,
+                    start=self.start,
+                    end=self.end,
+                    interval=self.interval,
+                    progress=False,
+                    auto_adjust=False,
+                )
+
+                # yfinance sometimes returns an empty dataframe instead of raising an error if rate-limited
+                if raw_frame is not None and not raw_frame.empty:
+                    break
+            except Exception as exc:
+                if attempt == max_retries - 1:
+                    self.logger.error(
+                        "CRITICAL: yfinance data fetch failed for %s after %d attempts. Original error: %s",
+                        self.ticker,
+                        max_retries,
+                        str(exc),
+                    )
+                    raise ConnectionError(f"Failed to fetch market data for {self.ticker} from yfinance.") from exc
+                continue
+
+        if raw_frame is None or raw_frame.empty:
             raise ValueError(
-                f"yfinance returned no data for {self.ticker} "
-                f"between {self.start} and {self.end}"
+                f"yfinance returned empty data for {self.ticker}. "
+                f"Verify the ticker, date range ({self.start} to {self.end}), or possible rate limiting."
             )
         clean_frame = _normalize_download_frame(raw_frame)
         if clean_frame.empty:
@@ -946,11 +936,21 @@ class ExecutionSimulator:
         commission: float = DEFAULT_COMMISSION_RATE,
         slippage: float = DEFAULT_SLIPPAGE_RATE,
         logger: logging.Logger | None = None,
+        position_manager: PositionManager | None = None,
+        portfolio_account: PortfolioAccount | None = None,
+        trade_recorder: TradeRecorder | None = None,
     ) -> None:
         self.initial_capital = initial_capital
         self.commission = commission
         self.slippage = slippage
         self.logger = logger or logging.getLogger(LOGGER_NAME)
+        self.position_manager = position_manager or PositionManager()
+        self.portfolio_account = portfolio_account or PortfolioAccount(initial_capital=self.initial_capital)
+        self.trade_recorder = trade_recorder or TradeRecorder(
+            commission=self.commission,
+            slippage=self.slippage,
+            short_borrow_cost_daily=SHORT_BORROW_COST_DAILY,
+        )
 
     def simulate(
         self,
@@ -958,13 +958,13 @@ class ExecutionSimulator:
         metrics_cache: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[list[TradeRecord], pd.Series]:
         """Simulate trade execution and return realized trades plus equity curve."""
-        trades: list[TradeRecord] = []
         equity_values: list[float] = []
         equity_index: list[pd.Timestamp] = []
 
         ticker = str(df.attrs.get("ticker", "UNKNOWN"))
-        cash = float(self.initial_capital)
-        position: PositionState | None = None
+        self.position_manager.reset()
+        self.portfolio_account.reset()
+        self.trade_recorder.reset()
         pending_entry: PendingEntry | None = None
         pending_exit: PendingExit | None = None
         last_bar_index = len(df) - 1
@@ -979,43 +979,35 @@ class ExecutionSimulator:
             date_str = _index_to_date_string(timestamp)
             metrics_for_bar = (metrics_cache or {}).get(date_str, {})
 
-            if pending_exit is not None and pending_exit.execute_index == bar_index and position is not None:
-                exit_fill_price = (
-                    open_price * (1.0 + self.slippage)
-                    if position.direction == PositionDirection.SHORT.value
-                    else open_price * (1.0 - self.slippage)
-                )
-                cash, trade = self._execute_exit(
-                    position=position,
-                    exit_date=date_str,
-                    exit_price=exit_fill_price,
-                    exit_reason=pending_exit.exit_reason,
-                    hold_bars=bar_index - position.entry_index,
-                    cash=cash,
-                )
-                trades.append(trade)
-                position = None
-                pending_exit = None
+            active_position = self.position_manager.get_position()
 
-            if pending_entry is not None and pending_entry.execute_index == bar_index and position is None:
-                position, cash = self._execute_entry(
+            if pending_exit is not None and pending_exit.execute_index == bar_index and active_position is not None:
+                _trade, realized_cash_delta = self.trade_recorder.record_trade(
+                    position=active_position,
+                    exit_price=open_price,
+                    exit_date=date_str,
+                    exit_reason=pending_exit.exit_reason.value,
+                    hold_bars=bar_index - active_position.entry_index,
+                )
+                self.portfolio_account.apply_realized_pnl(realized_cash_delta)
+                self.position_manager.close_position()
+                pending_exit = None
+                active_position = None
+
+            if pending_entry is not None and pending_entry.execute_index == bar_index and not self.position_manager.is_open():
+                self._execute_entry(
                     ticker=ticker,
                     pending_entry=pending_entry,
                     entry_date=date_str,
                     entry_index=bar_index,
                     open_price=open_price,
-                    cash=cash,
                     direction=pending_entry.direction,
                 )
                 pending_entry = None
+                active_position = self.position_manager.get_position()
 
-            if position is None:
-                mark_to_market_value = 0.0
-            elif position.direction == PositionDirection.SHORT.value:
-                mark_to_market_value = -(position.shares * close_price)
-            else:
-                mark_to_market_value = position.shares * close_price
-            current_equity = cash + mark_to_market_value
+            mtm = self.position_manager.calculate_mark_to_market(close_price)
+            current_equity = self.portfolio_account.get_total_equity(mtm)
             equity_index.append(timestamp)
             equity_values.append(current_equity)
 
@@ -1023,8 +1015,8 @@ class ExecutionSimulator:
             current_signal = str(row.get("signal", SignalAction.HOLD.value)).upper()
             current_regime = str(row.get("regime", MarketRegime.UNKNOWN.value))
             confidence = max(0, min(MAX_CONFIDENCE, _coerce_int(row.get("confidence"))))
-            has_position = position is not None
-            open_direction = position.direction if position is not None else PositionDirection.FLAT.value
+            has_position = self.position_manager.is_open()
+            open_direction = active_position.direction if active_position is not None else PositionDirection.FLAT.value
             signal_intent = classify_signal_intent(
                 signal=current_signal,
                 regime=current_regime,
@@ -1032,8 +1024,8 @@ class ExecutionSimulator:
                 open_position_direction=open_direction,
             )
 
-            if position is not None and pending_exit is None and has_next_bar:
-                hold_bars = (bar_index + 1) - position.entry_index
+            if active_position is not None and pending_exit is None and has_next_bar:
+                hold_bars = (bar_index + 1) - active_position.entry_index
                 if signal_intent in ("EXIT_LONG", "EXIT_SHORT"):
                     pending_exit = PendingExit(
                         execute_index=bar_index + 1,
@@ -1042,7 +1034,7 @@ class ExecutionSimulator:
                 else:
                     exit_reason = self._evaluate_exit_reason(
                         current_signal=current_signal,
-                        position=position,
+                        position=active_position,
                         high_price=high_price,
                         low_price=low_price,
                         hold_bars=hold_bars,
@@ -1052,7 +1044,7 @@ class ExecutionSimulator:
                     if exit_reason is not None:
                         pending_exit = PendingExit(execute_index=bar_index + 1, exit_reason=exit_reason)
             elif (
-                position is None
+                not self.position_manager.is_open()
                 and pending_entry is None
                 and has_next_bar
                 and MAX_SIMULTANEOUS_POSITIONS > 0
@@ -1099,37 +1091,33 @@ class ExecutionSimulator:
                             direction=entry_direction,
                         )
 
-        if position is not None and equity_values:
+        final_position = self.position_manager.get_position()
+        if final_position is not None and equity_values:
             self.logger.warning(FINAL_LIQUIDATION_LOG_TEMPLATE, ticker)
             final_row = df.iloc[-1]
             final_signal = str(final_row.get("signal", SignalAction.HOLD.value)).upper()
             final_exit_reason = self._infer_terminal_exit_reason(
                 final_signal=final_signal,
-                position=position,
+                position=final_position,
                 high_price=_coerce_float(final_row.get("High")),
                 low_price=_coerce_float(final_row.get("Low")),
-                hold_bars=len(df) - position.entry_index,
+                hold_bars=len(df) - final_position.entry_index,
                 current_regime=str(final_row.get("regime", MarketRegime.UNKNOWN.value)),
                 metrics=(metrics_cache or {}).get(_index_to_date_string(df.index[-1]), {}),
             )
-            final_cash, trade = self._execute_exit(
-                position=position,
+            _trade, realized_cash_delta = self.trade_recorder.record_trade(
+                position=final_position,
                 exit_date=_index_to_date_string(df.index[-1]),
-                exit_price=(
-                    _coerce_float(final_row.get("Close")) * (1.0 + self.slippage)
-                    if position.direction == PositionDirection.SHORT.value
-                    else _coerce_float(final_row.get("Close")) * (1.0 - self.slippage)
-                ),
-                exit_reason=final_exit_reason,
-                hold_bars=len(df) - position.entry_index,
-                cash=cash,
+                exit_price=_coerce_float(final_row.get("Close")),
+                exit_reason=final_exit_reason.value,
+                hold_bars=len(df) - final_position.entry_index,
             )
-            trades.append(trade)
-            cash = final_cash
-            equity_values[-1] = cash
+            self.portfolio_account.apply_realized_pnl(realized_cash_delta)
+            self.position_manager.close_position()
+            equity_values[-1] = self.portfolio_account.get_cash()
 
         equity_curve = pd.Series(equity_values, index=equity_index, dtype="float64", name="equity")
-        return trades, equity_curve
+        return self.trade_recorder.trade_history, equity_curve
 
     def _execute_entry(
         self,
@@ -1138,27 +1126,26 @@ class ExecutionSimulator:
         entry_date: str,
         entry_index: int,
         open_price: float,
-        cash: float,
         direction: str = PositionDirection.LONG.value,
-    ) -> tuple[PositionState | None, float]:
-        """Execute a scheduled entry order at the next bar open."""
+    ) -> None:
+        """Execute a scheduled entry order at the next bar open and store it in the position manager."""
         if direction == PositionDirection.SHORT.value:
             effective_entry_price = open_price * (1.0 - self.slippage)
             if effective_entry_price <= 0.0:
                 self.logger.warning("Skipping short entry for %s on %s due to non-positive fill price.", ticker, entry_date)
-                return None, cash
+                return
 
             shares = pending_entry.allocation_value / (
                 effective_entry_price * SHORT_MARGIN_REQUIREMENT * (1.0 + self.commission)
             )
             if shares <= 0.0:
-                return None, cash
+                return
 
             gross_sale_value = shares * effective_entry_price
             entry_commission = gross_sale_value * self.commission
             net_sale_proceeds = gross_sale_value - entry_commission
-            updated_cash = cash + net_sale_proceeds
-            position = PositionState(
+            self.portfolio_account.apply_cash_flow(net_sale_proceeds)
+            self.position_manager.open_short(
                 ticker=ticker,
                 entry_index=entry_index,
                 entry_date=entry_date,
@@ -1169,33 +1156,33 @@ class ExecutionSimulator:
                 confidence=pending_entry.confidence,
                 reasoning=pending_entry.reasoning,
                 regime=pending_entry.regime,
-                direction=PositionDirection.SHORT.value,
             )
-            return position, updated_cash
+            return
 
         effective_entry_price = open_price * (1.0 + self.slippage)
         if effective_entry_price <= 0.0:
             self.logger.warning("Skipping entry for %s on %s due to non-positive fill price.", ticker, entry_date)
-            return None, cash
+            return
 
         shares = pending_entry.allocation_value / (effective_entry_price * (1.0 + self.commission))
         if shares <= 0.0:
-            return None, cash
+            return
 
         gross_entry_value = shares * effective_entry_price
         entry_commission = gross_entry_value * self.commission
         total_entry_cost = gross_entry_value + entry_commission
-        if total_entry_cost > cash:
-            shares = cash / (effective_entry_price * (1.0 + self.commission))
+        available_cash = self.portfolio_account.get_cash()
+        if total_entry_cost > available_cash:
+            shares = available_cash / (effective_entry_price * (1.0 + self.commission))
             gross_entry_value = shares * effective_entry_price
             entry_commission = gross_entry_value * self.commission
             total_entry_cost = gross_entry_value + entry_commission
 
         if shares <= 0.0 or total_entry_cost <= 0.0:
-            return None, cash
+            return
 
-        updated_cash = cash - total_entry_cost
-        position = PositionState(
+        self.portfolio_account.apply_cash_flow(-total_entry_cost)
+        self.position_manager.open_long(
             ticker=ticker,
             entry_index=entry_index,
             entry_date=entry_date,
@@ -1206,78 +1193,8 @@ class ExecutionSimulator:
             confidence=pending_entry.confidence,
             reasoning=pending_entry.reasoning,
             regime=pending_entry.regime,
-            direction=PositionDirection.LONG.value,
         )
-        return position, updated_cash
-
-    def _execute_exit(
-        self,
-        position: PositionState,
-        exit_date: str,
-        exit_price: float,
-        exit_reason: ExitReason,
-        hold_bars: int,
-        cash: float,
-    ) -> tuple[float, TradeRecord]:
-        """Execute a scheduled exit order and realize trade PnL."""
-        if position.direction == PositionDirection.SHORT.value:
-            effective_exit_price = max(exit_price, 0.0)
-            borrow_cost = (
-                position.shares * position.entry_price *
-                SHORT_BORROW_COST_DAILY * hold_bars
-            )
-            gross_cover_cost = position.shares * effective_exit_price
-            exit_commission = gross_cover_cost * self.commission
-            total_cover_cost = gross_cover_cost + exit_commission + borrow_cost
-            pnl = position.entry_cost - total_cover_cost
-            pnl_pct = pnl / position.entry_cost if position.entry_cost > 0.0 else 0.0
-            updated_cash = cash - total_cover_cost
-
-            trade = TradeRecord(
-                ticker=position.ticker,
-                entry_date=position.entry_date,
-                exit_date=exit_date,
-                entry_price=position.entry_price,
-                exit_price=effective_exit_price,
-                shares=position.shares,
-                pnl=pnl,
-                pnl_pct=pnl_pct,
-                signal=position.signal,
-                confidence=position.confidence,
-                reasoning=position.reasoning,
-                regime=position.regime,
-                hold_bars=hold_bars,
-                exit_reason=exit_reason.value,
-                direction=PositionDirection.SHORT.value,
-            )
-            return updated_cash, trade
-
-        effective_exit_price = max(exit_price, 0.0)
-        gross_exit_value = position.shares * effective_exit_price
-        exit_commission = gross_exit_value * self.commission
-        net_exit_value = gross_exit_value - exit_commission
-        updated_cash = cash + net_exit_value
-        pnl = net_exit_value - position.entry_cost
-        pnl_pct = pnl / position.entry_cost if position.entry_cost > 0.0 else 0.0
-
-        trade = TradeRecord(
-            ticker=position.ticker,
-            entry_date=position.entry_date,
-            exit_date=exit_date,
-            entry_price=position.entry_price,
-            exit_price=effective_exit_price,
-            shares=position.shares,
-            pnl=pnl,
-            pnl_pct=pnl_pct,
-            signal=position.signal,
-            confidence=position.confidence,
-            reasoning=position.reasoning,
-            regime=position.regime,
-            hold_bars=hold_bars,
-            exit_reason=exit_reason.value,
-            direction=PositionDirection.LONG.value,
-        )
-        return updated_cash, trade
+        return
 
     def _evaluate_exit_reason(
         self,

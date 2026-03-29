@@ -1,3 +1,0 @@
-[
-  "If Master Sameer gives me a multi-step command, I MUST use the create_mission_plan tool to break it down. I must NEVER use analyze_screen to check the active window, because I can simply read the World State text in my prompt."
-]

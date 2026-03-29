@@ -13,10 +13,11 @@ schedule
 feedparser
 pandas
 yfinance
+pytest==7.4.3
+pytest-mock==3.12.0
 # v0.2 additions
 httpx                    # Faster Ollama health checks (optional)
-# Optional: pip install these for specific features
-# python-telegram-bot    # Telegram channel (Phase 5)
-# fastapi                # REST API server (Phase 5)
-# uvicorn                # ASGI server for FastAPI (Phase 5)
-# mcp                    # Model Context Protocol server (Phase 6)
+python-telegram-bot    # Telegram channel (Phase 5)
+fastapi                # REST API server (Phase 5)
+uvicorn                # ASGI server for FastAPI (Phase 5)
+mcp                    # Model Context Protocol server (Phase 6)
