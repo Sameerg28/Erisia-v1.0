@@ -507,8 +507,8 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
             source_lower = skill_file.read().lower()
         if "pip install" in source_lower or ('"-m", "pip"' in source_lower) or ("'-m', 'pip'" in source_lower):
             requires_isolation = True
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
 
     runner_code = (
         "import contextlib\n"
@@ -595,8 +595,8 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
             if using_ephemeral_env and ephemeral_root and os.path.exists(ephemeral_root):
                 try:
                     shutil.rmtree(ephemeral_root, ignore_errors=True)
-                except Exception:
-                    pass
+                except Exception as e:
+                    _logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
 
         raw_stdout = (result.stdout or "").strip()
         payload = None

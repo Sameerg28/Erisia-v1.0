@@ -20,7 +20,7 @@ class IdentityManager:
                 logger.warning(f"Consciousness file missing at {self.consciousness_file}")
                 return "You are Erisia, an advanced AGI."
         except Exception as e:
-            logger.error(f"Failed to read consciousness file: {e}")
+            logger.error(f"Failed to read consciousness file: {e}", exc_info=True)
             return "You are Erisia, an advanced AGI."
 
     def update_stress(self, delta: float) -> float:

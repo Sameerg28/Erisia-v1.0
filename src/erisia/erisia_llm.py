@@ -129,8 +129,8 @@ class OllamaEngine(InferenceEngine):
             if resp.status_code == 200:
                 data = resp.json()
                 return [m["name"] for m in data.get("models", [])]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
         return []
 
 
@@ -443,8 +443,8 @@ def query_llm(
                     result = router._together.generate(**kwargs)
                     router.stats["together"] += 1
                     return result
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
 
             # Try Gemini
             if router._gemini and router._gemini.is_available() and engine.name != "gemini":
@@ -472,8 +472,8 @@ def query_llm(
                     result = router._gemini.generate(**kwargs)
                     router.stats["gemini"] += 1
                     return result
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
 
             # Try Ollama as absolute last resort
             if router._ollama and router._ollama.is_available() and engine.name != "ollama":
@@ -487,8 +487,8 @@ def query_llm(
                     result = router._ollama.generate(**kwargs)
                     router.stats["ollama"] += 1
                     return result
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Caught unhandled exception in {__name__}: {e}", exc_info=True)
 
         # Nothing worked — raise the original error
         raise
