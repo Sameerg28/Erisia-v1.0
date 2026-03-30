@@ -210,10 +210,7 @@ def classify_signal_intent(
     """Classify a raw signal into an entry, exit, or hold intent."""
     if signal == SignalAction.BUY.value:
         if not has_open_position:
-            # Never enter long in a bear market
-            if regime == MarketRegime.BEAR.value:
-                return "HOLD"
-            return "ENTER_LONG"
+            return "HOLD" if regime == MarketRegime.BEAR.value else "ENTER_LONG"
         if open_position_direction == PositionDirection.SHORT.value:
             return "EXIT_SHORT"
         return "HOLD"
@@ -286,8 +283,7 @@ class DataLayer:
             self.logger.error("No historical data returned for %s between %s and %s", self.ticker, self.start, self.end)
             raise ValueError(f"No data returned for {self.ticker}")
 
-        missing_columns = [column for column in REQUIRED_OHLCV_COLUMNS if column not in clean_frame.columns]
-        if missing_columns:
+        if missing_columns := [column for column in REQUIRED_OHLCV_COLUMNS if column not in clean_frame.columns]:
             raise ValueError(f"Missing required OHLCV columns for {self.ticker}: {', '.join(missing_columns)}")
 
         clean_frame = clean_frame.loc[:, list(REQUIRED_OHLCV_COLUMNS)].copy()
@@ -442,7 +438,7 @@ class SignalLayer:
         if bb_width_pct >= BB_HIGH_VOL_PERCENTILE:
             return MarketRegime.VOLATILE.value
 
-        if bb_width_pct < BB_HIGH_VOL_PERCENTILE:
+        else:
             return MarketRegime.SIDEWAYS.value
 
         return MarketRegime.UNKNOWN.value
@@ -911,7 +907,7 @@ class RegimeDetector:
         volatility = daily_returns.rolling(window=VOLATILITY_WINDOW, min_periods=VOLATILITY_WINDOW).std()
 
         valid_volatility = volatility.dropna()
-        volatility_threshold = float(valid_volatility.quantile(VOLATILITY_QUANTILE)) if not valid_volatility.empty else math.inf
+        volatility_threshold = float(valid_volatility.quantile(VOLATILITY_QUANTILE)) if valid_volatility.empty else math.inf
 
         regime_series = pd.Series(MarketRegime.UNKNOWN.value, index=regime_frame.index, dtype="object")
         bull_mask = (close_series > sma_fast) & (sma_fast > sma_slow) & (volatility < volatility_threshold)
@@ -1299,7 +1295,7 @@ class AnalyticsEngine:
     def compute(self, trades: list[TradeRecord], equity_curve: pd.Series, ticker: str, mode: BacktestMode) -> BacktestReport:
         """Compute institutional performance metrics for a completed backtest run."""
         total_trades = len(trades)
-        total_pnl = float(equity_curve.iloc[-1] - equity_curve.iloc[0]) if not equity_curve.empty else 0.0
+        total_pnl = 0.0 if equity_curve.empty else float(equity_curve.iloc[-1] - equity_curve.iloc[0])
         wins = [trade for trade in trades if trade.pnl > 0.0]
         win_rate = (len(wins) / total_trades) if total_trades > 0 else 0.0
         avg_pnl_per_trade = (sum(trade.pnl for trade in trades) / total_trades) if total_trades > 0 else 0.0
@@ -1321,7 +1317,7 @@ class AnalyticsEngine:
         else:
             rolling_max = equity_curve.cummax()
             drawdown = (equity_curve - rolling_max) / rolling_max.replace(0.0, np.nan)
-            max_drawdown = float(drawdown.min()) if not drawdown.dropna().empty else 0.0
+            max_drawdown = 0.0 if not drawdown.dropna().empty else float(drawdown.min())
             max_drawdown_duration = _compute_max_drawdown_duration(drawdown)
 
         gross_profit = sum(trade.pnl for trade in trades if trade.pnl > 0.0)
@@ -2147,16 +2143,8 @@ def _format_war_room_report(
     regime_lines = "\n".join(_build_regime_table_lines(report))
     long_trades = sum(1 for trade in trades if trade.direction == PositionDirection.LONG.value)
     short_trades = sum(1 for trade in trades if trade.direction == PositionDirection.SHORT.value)
-    long_wins = sum(
-        1
-        for trade in trades
-        if trade.direction == PositionDirection.LONG.value and trade.pnl > 0.0
-    )
-    short_wins = sum(
-        1
-        for trade in trades
-        if trade.direction == PositionDirection.SHORT.value and trade.pnl > 0.0
-    )
+    long_wins = sum(1 for trade in trades if trade.direction == PositionDirection.LONG.value and trade.pnl > 0.0)
+    short_wins = sum(1 for trade in trades if trade.direction == PositionDirection.SHORT.value and trade.pnl > 0.0)
     long_wr = (long_wins / long_trades * 100) if long_trades > 0 else 0.0
     short_wr = (short_wins / short_trades * 100) if short_trades > 0 else 0.0
     exit_lines = "Exit Reasons:\n"

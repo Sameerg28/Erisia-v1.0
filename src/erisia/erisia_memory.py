@@ -25,7 +25,7 @@ class MemoryManager:
             return chromadb.PersistentClient(path=str(self.memory_dir))
         except Exception as _chroma_exc:
             logger.warning(f"ChromaDB corruption detected: {_chroma_exc}. Attempting recovery...")
-            _backup = Path(str(self.memory_dir) + "_corrupted_backup")
+            _backup = Path(f"{self.memory_dir}_corrupted_backup")
             try:
                 if _backup.exists():
                     shutil.rmtree(str(_backup))
@@ -40,7 +40,7 @@ class MemoryManager:
                 logger.critical(f"ChromaDB recovery FAILED: {recovery_error}")
                 raise RuntimeError(f"Cannot recover ChromaDB: {recovery_error}") from recovery_error
 
-    def add_memory(self, document: str, metadata: dict = None, doc_id: str = None):
+    def add_memory(self, document: str, metadata: dict | None = None, doc_id: str | None = None):
         """Insert a new memory into the vector store."""
         if not document:
             return None
@@ -67,8 +67,10 @@ class MemoryManager:
                     query_texts=[query_text],
                     n_results=n_results
                 )
-                if results and results.get("documents") and len(results["documents"]) > 0:
-                    return results["documents"][0]
+                if results:
+                    documents = results.get("documents")
+                    if documents and len(documents) > 0:
+                        return documents[0]
             except Exception as e:
                 logger.error(f"Failed to query memory: {e}")
         return []

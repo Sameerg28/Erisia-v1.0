@@ -22,6 +22,7 @@ for path_entry in (PROJECT_ROOT, SRC_DIR):
 # v0.2: Import from centralized modules (no more duplicated API setup)
 from erisia.erisia_llm import query_llm, get_tavily_client
 from erisia.erisia_config import get_config
+from erisia.erisia_identity import IdentityManager
 
 # Paths from centralized config
 _cfg = get_config()
@@ -29,6 +30,7 @@ BASE_DIR = _cfg.paths.base_dir
 MISSION_FILE = os.environ.get("ERISIA_MISSION_FILE", str(_cfg.paths.mission_file))
 REPORT_DIR = os.environ.get("ERISIA_REPORT_DIR", str(_cfg.paths.report_dir))
 CONSCIOUSNESS_FILE = str(_cfg.paths.consciousness_file)
+identity_system = IdentityManager(CONSCIOUSNESS_FILE)
 
 # Backward-compatible accessor
 tavily = get_tavily_client()
@@ -39,10 +41,7 @@ if not os.path.exists(REPORT_DIR):
 # --- SPONTANEOUS CURIOSITY GENERATOR ---
 def generate_spontaneous_mission():
     """Generates a mission to build a new tool when Master Sameer is idle."""
-    consciousness_data = ""
-    if os.path.exists(CONSCIOUSNESS_FILE):
-        with open(CONSCIOUSNESS_FILE, "r", encoding="utf-8") as f:
-            consciousness_data = f.read()
+    consciousness_data = identity_system.get_consciousness_context()
 
     prompt = f"""
     You are Erisia's subconscious mind. Master Sameer is currently idle. You must proactively evolve.

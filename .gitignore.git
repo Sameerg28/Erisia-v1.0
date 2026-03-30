@@ -1,0 +1,12 @@
+# Virtual environment
+.venv/
+
+# Data (runtime + generated)
+data/
+*.bin
+*.sqlite3
+*.jsonl
+
+# Python cache
+__pycache__/
+*.pyc

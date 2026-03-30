@@ -1,0 +1,1 @@
+Your current primary directive is: Analyze `forge_pending_skill` tool and its dependencies. Write, test, and execute code in your sandbox to achieve this. 

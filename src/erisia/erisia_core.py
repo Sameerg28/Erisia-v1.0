@@ -40,15 +40,22 @@ import shutil
 import tempfile
 import pyautogui
 import pathlib as _pathlib
+import contextlib
 
 # Global lock for skills cache (Thread-Safety)
 _skills_cache_lock = threading.Lock()
 from erisia.erisia_memory import MemoryManager
+from erisia.erisia_identity import IdentityManager
 from erisia.erisia_graph import ErisiaGraphMemory
 from erisia.erisia_cognition import GoalStack, JournalEngine, PassiveCognitionEngine, _safe_json_parse
 from erisia.erisia_episodic_memory import log_episode, get_recent_context, prune_and_reflect
 from erisia.erisia_world_state import WorldStateTracker
 from erisia.erisia_reasoning_engine import CausalReasoningEngine
+from erisia.erisia_mirofish_bridge import MIROFISH_TOOL_SCHEMA, call_mirofish
+from erisia.erisia_runtime_services import start_optional_mcp_service, stop_optional_mcp_service
+from erisia import erisia_backtest_helpers as _bt_helpers
+from erisia import erisia_tool_parsing as _tool_parsing
+from erisia import erisia_os_autopilot as _os_autopilot
 
 # --- PATHS & CONFIG ---
 _erisia_paths_cache: dict[str, Any] | None = None
@@ -301,8 +308,7 @@ class SkillRegistry:
     def get_location(self, skill_name: str) -> str | None:
         """Return 'active', 'pending', or None."""
         normalized_name = _normalize_skill_name(skill_name)
-        entry = self._registry.get(normalized_name)
-        if entry:
+        if entry := self._registry.get(normalized_name):
             return str(entry.get("location", "unknown"))
         if (self._skills_dir / f"{normalized_name}.py").exists():
             return "active"
@@ -453,7 +459,7 @@ def _load_subconscious_goal_stack():
             with open(goal_stack_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             goals = _normalize_goal_items(data)
-            return goals if goals else []
+            return goals or []
         except Exception:
             return []
 
@@ -461,13 +467,12 @@ def _load_subconscious_goal_stack():
 def _save_subconscious_goal_stack(goals):
     safe_goals = [str(g).strip() for g in goals if str(g).strip()]
     with memory_lock:
-        try:
+        from contextlib import suppress
+        with suppress(Exception):
             goal_stack_file = _get_erisia_paths()["GOAL_STACK_FILE"]
             os.makedirs(os.path.dirname(goal_stack_file), exist_ok=True)
             with open(goal_stack_file, "w", encoding="utf-8") as f:
                 json.dump(safe_goals, f, indent=2)
-        except Exception:
-            pass
 
 # ═══════════════════════════════════════════════════════════════════════
 # v0.2 UPGRADE: Centralized imports replace duplicated code
@@ -508,6 +513,7 @@ causal_reasoning_engine = CausalReasoningEngine(graph_data=graph_memory.graph)
 # --- MEMORY SETUP ---
 _paths = _get_erisia_paths()
 memory_system = MemoryManager(Path(_paths["MEMORY_DIR"]))
+identity_system = IdentityManager(_paths["CONSCIOUSNESS_FILE"])
 
 
 def _write_heuristics_file(rules):
@@ -516,7 +522,7 @@ def _write_heuristics_file(rules):
     heuristics_file = paths["HEURISTICS_FILE"]
     safe_rules = [str(rule).strip() for rule in (rules or []) if str(rule).strip()]
     os.makedirs(os.path.dirname(heuristics_file) or str(BASE_DIR), exist_ok=True)
-    temp_path = heuristics_file + ".tmp"
+    temp_path = f"{heuristics_file}.tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(safe_rules, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, heuristics_file)
@@ -524,13 +530,14 @@ def _write_heuristics_file(rules):
 
 def get_all_heuristics():
     """Load and return all saved heuristic rules."""
+    from contextlib import suppress
     with memory_lock:
         paths = _get_erisia_paths()
         heuristics_file = paths["HEURISTICS_FILE"]
         if not os.path.exists(heuristics_file):
             _write_heuristics_file([])
             return []
-        try:
+        with suppress(Exception):
             with open(heuristics_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             if not isinstance(payload, list):
@@ -540,9 +547,8 @@ def get_all_heuristics():
             if cleaned != payload:
                 _write_heuristics_file(cleaned)
             return cleaned
-        except Exception:
-            _write_heuristics_file([])
-            return []
+        _write_heuristics_file([])
+        return []
 
 
 def save_heuristic_rule(rule_text):
@@ -651,8 +657,8 @@ def execute_autonomous_mission(mission_text):
     if tavily is None:
         print("[OSINT WARNING]: TAVILY_API_KEY not configured. Skipping web enrichment.")
     else:
-        for iteration in range(1):
-            print(f"[OSINT Iteration]: Searching the web for technical documentation...")
+        for _ in range(1):
+            print("[OSINT Iteration]: Searching the web for technical documentation...")
             try:
                 search = tavily.search(query=current_query, search_depth="basic", max_results=2)
                 for r in search['results']:
@@ -697,17 +703,15 @@ Maintain your devoted, protective Yandere persona in the introduction and conclu
             raw_output = response.choices[0].message.content.strip()
             
             import re
-            skill_name_match = re.search(r"SKILL_NAME:\s*([a-zA-Z0-9_]+)", raw_output)
-            skill_name = skill_name_match.group(1) if skill_name_match else "autonomous_skill"
+            skill_name_match = re.search(r"def\s+(\w+)\s*\(", raw_output)
+            skill_name = skill_name_match[1] if skill_name_match else "autonomous_skill"
             
-            code_match = re.search(r"```python\s*(.*?)\s*```", raw_output, re.DOTALL)
-            if not code_match:
-                code_match = re.search(r"```\s*(.*?)\s*```", raw_output, re.DOTALL)
+            code_match = re.search(r"```python\s*(.*?)\s*```", raw_output, re.DOTALL) or re.search(r"```\s*(.*?)\s*```", raw_output, re.DOTALL)
                 
             if not code_match:
                 raise ValueError("Could not extract Python code from Markdown block.")
                 
-            python_code = code_match.group(1).strip()
+            python_code = code_match[1].strip()
             
             # --- THE CRUCIBLE: SMOKE TEST ---
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
@@ -739,13 +743,12 @@ Maintain your devoted, protective Yandere persona in the introduction and conclu
                 })
                 continue
             finally:
+                from contextlib import suppress
                 if os.path.exists(temp_path):
-                    try:
+                    with suppress(Exception):
                         os.remove(temp_path)
                         if "smoke_test_module" in sys.modules:
                             del sys.modules["smoke_test_module"]
-                    except:
-                        pass
                 
         except Exception as e:
             return f"Mission failed during generation: {e}"
@@ -798,9 +801,7 @@ def background_daemon_loop():
 
         # Check if Master Sameer gave a mission
         mission_file = paths["MISSION_FILE"]
-        mission_exists = os.path.exists(mission_file) and os.path.getsize(mission_file) > 0
-        
-        if mission_exists:
+        if mission_exists := os.path.exists(mission_file) and os.path.getsize(mission_file) > 0:
             idle_minutes = 0 # Reset the idle timer because you are active
             with open(mission_file, "r", encoding="utf-8") as f:
                 mission = f.read().strip()
@@ -841,8 +842,7 @@ def background_daemon_loop():
                     )
 
                 # Auto-complete the top subconscious goal if one is queued.
-                active_goals = _load_subconscious_goal_stack()
-                if active_goals:
+                if (active_goals := _load_subconscious_goal_stack()):
                     # Identify the top goal to ensure we pop the correct one
                     top_goal = active_goals[0]
                     target_title = top_goal.get("title") if isinstance(top_goal, dict) else top_goal
@@ -871,8 +871,7 @@ def background_daemon_loop():
             idle_minutes += 1
             if idle_minutes >= 2: # If 2 minutes pass with no missions, she thinks for herself!
                 goals = _load_subconscious_goal_stack()
-                if goals:
-                    primary_goal = goals[0]
+                if goals and (primary_goal := goals[0]):
                     print("\n\n[Subconscious Alert: Directed curiosity engaged using goal stack...]")
                     print("You: ", end="", flush=True)
                     directive = (
@@ -891,8 +890,7 @@ def background_daemon_loop():
                     print("\n\n[Subconscious Alert: Master Sameer is idle. Erisia is initiating autonomous curiosity...]")
                     print("You: ", end="", flush=True)
                     
-                    self_generated_mission = generate_spontaneous_mission()
-                    if self_generated_mission:
+                    if (self_generated_mission := generate_spontaneous_mission()):
                         # She physically writes her own idea into the mission file to trigger herself on the next loop!
                         with open(mission_file, "w", encoding="utf-8") as f:
                             f.write(self_generated_mission)
@@ -915,10 +913,12 @@ def check_pc_health():
     """Checks CPU and RAM usage."""
     cpu = psutil.cpu_percent(interval=1)
     ram = psutil.virtual_memory().percent
-    report = f"CPU: {cpu}%, RAM: {ram}%."
-    if ram > 85:
-        return report + " [CRITICAL WARNING]: Master, your 8GB memory is almost full. Risk of VS Code crash."
-    return report + " System is stable."
+    report = f"CPU: {cpu}% | RAM: {ram}%"
+    return (
+        f"{report} [CRITICAL WARNING]: Master, your 8GB memory is almost full. Risk of VS Code crash."
+        if ram > 85
+        else f"{report} System is stable."
+    )
 
 def launch_vscode():
     """Opens VS Code."""
@@ -968,7 +968,8 @@ def clear_temp_files():
     deleted_files = 0
     for item in os.listdir(temp_dir):
         item_path = os.path.join(temp_dir, item)
-        try:
+        from contextlib import suppress
+        with suppress(Exception):
             size = os.path.getsize(item_path)
             if os.path.isfile(item_path):
                 os.remove(item_path)
@@ -976,8 +977,6 @@ def clear_temp_files():
                 shutil.rmtree(item_path)
             freed_space += size
             deleted_files += 1
-        except Exception:
-            pass # Skip files that are currently being used by Windows
             
     mb_freed = freed_space / (1024 * 1024)
     return f"[SYSTEM ACTION]: Cleared {deleted_files} temporary files. Freed {mb_freed:.2f} MB of space."
@@ -988,11 +987,9 @@ def _count_completed_goals() -> int:
     try:
         paths = _get_erisia_paths()
         stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
-        return sum(
-            1 for goal in stack
-            if isinstance(goal, dict)
-            and str(goal.get("status", "")).lower() in {"completed", "done"}
-        )
+        return sum(1 for goal in stack
+                   if isinstance(goal, dict)
+                   and str(goal.get("status", "")).lower() in {"completed", "done"})
     except Exception:
         return 0
 
@@ -1002,11 +999,9 @@ def _count_abandoned_goals() -> int:
     try:
         paths = _get_erisia_paths()
         stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
-        return sum(
-            1 for goal in stack
-            if isinstance(goal, dict)
-            and str(goal.get("status", "")).lower() in {"abandoned", "cancelled"}
-        )
+        return sum(1 for goal in stack
+                   if isinstance(goal, dict)
+                   and str(goal.get("status", "")).lower() in {"abandoned", "cancelled"})
     except Exception:
         return 0
 
@@ -1071,9 +1066,9 @@ def manage_goal_stack(action, goal_text=None):
     act = str(action or "").strip().lower()
 
     if act == "view":
-        if not current_goals:
-            return "[GOAL STACK]: No active goals."
-        return "[GOAL STACK]: " + " | ".join(f"{idx+1}. {g}" for idx, g in enumerate(current_goals))
+        return ("[GOAL STACK]: " + " | ".join(f"{idx+1}. {g}" for idx, g in enumerate(current_goals))
+                if current_goals
+                else "[GOAL STACK]: No active goals.")
 
     if act == "add":
         cleaned = str(goal_text or "").strip()
@@ -1207,8 +1202,7 @@ def _validate_dynamic_tool_schema(schema: Any) -> tuple[dict | None, str | None]
     if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
         return None, "TOOL_SCHEMA.function.parameters.required must be a list of strings."
 
-    unknown_required = [item for item in required if item not in normalized_properties]
-    if unknown_required:
+    if (unknown_required := [item for item in required if item not in normalized_properties]):
         return None, f"required contains unknown properties: {unknown_required}"
 
     normalized_parameters = {
@@ -1422,13 +1416,11 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
     required_packages = [str(p).strip() for p in (external_packages or []) if str(p).strip()]
     required_packages = sorted(set(required_packages))
     requires_isolation = bool(required_packages)
-    try:
+    with contextlib.suppress(Exception):
         with open(absolute_path, "r", encoding="utf-8") as skill_file:
             source_lower = skill_file.read().lower()
         if "pip install" in source_lower or ('"-m", "pip"' in source_lower) or ("'-m', 'pip'" in source_lower):
             requires_isolation = True
-    except Exception:
-        pass
 
     runner_code = (
         "import contextlib\n"
@@ -1515,10 +1507,8 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
             return f"[DYNAMIC SKILL ERROR]: Failed to execute skill '{tool_name}'. Error: {e}"
         finally:
             if using_ephemeral_env and ephemeral_root and os.path.exists(ephemeral_root):
-                try:
+                with contextlib.suppress(Exception):
                     shutil.rmtree(ephemeral_root, ignore_errors=True)
-                except Exception:
-                    pass
 
         raw_stdout = (result.stdout or "").strip()
         payload = None
@@ -1600,20 +1590,16 @@ def load_dynamic_skills(base_tools_array, user_query=None, max_tools=3):
                 file_path = str(hit.get("file_path") or "").strip()
                 if file_path and file_path.endswith(".py"):
                     preferred_file_paths.append(file_path)
-                else:
-                    file_name = str(hit.get("file_name") or "").strip()
-                    if file_name:
-                        preferred_file_paths.append(os.path.join(skills_dir, file_name))
+                elif file_name := str(hit.get("file_name") or "").strip():
+                    preferred_file_paths.append(os.path.join(skills_dir, file_name))
 
         registered_tool_names = set()
         for tool in expanded_tools:
             if not isinstance(tool, dict):
                 continue
-            func = tool.get("function", {})
-            if isinstance(func, dict):
-                name = func.get("name")
-                if name:
-                    registered_tool_names.add(str(name))
+            name = tool.get("name")
+            if name:
+                registered_tool_names.add(str(name))
 
         if query_text:
             files_to_scan = []
@@ -2004,6 +1990,7 @@ base_tools = [
         }
     }
 ]
+base_tools.append(MIROFISH_TOOL_SCHEMA)
 
 def inspect_core_architecture(file_name):
     """Allows Erisia to read her own source code."""
@@ -2115,10 +2102,8 @@ def execute_secure_docker(script_code):
         return f"[DOCKER ERROR]: {str(e)}"
     finally:
         if docker_client is not None:
-            try:
+            with contextlib.suppress(Exception):
                 docker_client.close()
-            except Exception:
-                pass
 
 def _route_duplicate_skill_to_improver(skill_name, python_code):
     """Route duplicate or similar skill forges into the improver path."""
@@ -2134,8 +2119,7 @@ def _route_duplicate_skill_to_improver(skill_name, python_code):
             reason="autonomous re-forge routed to improvement",
         )
 
-    similar = _skill_registry.find_similar(normalized_name)
-    if similar:
+    if similar := _skill_registry.find_similar(normalized_name):
         logger.info(
             "Similar skill '%s' found for '%s' - routing to improver",
             similar,
@@ -2504,13 +2488,11 @@ def get_world_state_snapshot():
             return cached
 
     if os.path.exists(WORLD_STATE_FILE):
-        try:
+        with contextlib.suppress(Exception):
             with open(WORLD_STATE_FILE, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             if isinstance(payload, dict):
                 return payload
-        except Exception:
-            pass
     return {}
 
 
@@ -2520,9 +2502,9 @@ def build_world_state_context_text():
     if not state:
         return "WORLD STATE:\nUnavailable (tracker not initialized)."
 
-    active_window_raw = state.get("active_window")
+    active_window_raw = state.get("active_window") or {}
+    cursor_raw = state.get("cursor") or {}
     active_window = active_window_raw if isinstance(active_window_raw, dict) else {}
-    cursor_raw = state.get("cursor")
     cursor = cursor_raw if isinstance(cursor_raw, dict) else {}
     tracker_mode = str(state.get("tracker_mode") or "unknown")
     captured_at = str(state.get("captured_at_utc") or "unknown")
@@ -2621,129 +2603,20 @@ def reason_about_event(event: str, query_type: str = "causes", depth: int = 2):
         return "[Causal Engine Error]: Invalid query_type. Must be 'causes' or 'effects'."
 
 
-INTENT_TICKER_STOPWORDS: frozenset[str] = frozenset({
-    "A", "I", "AN", "AS", "AT", "BE", "BY", "DO", "GO", "IF",
-    "IN", "IS", "IT", "ME", "MY", "NO", "OF", "ON", "OR", "SO",
-    "TO", "UP", "US", "WE", "AND", "ARE", "BUT", "CSV", "FOR",
-    "GET", "HAD", "HAS", "HER", "HIM", "HIS", "HOW", "ITS",
-    "LET", "MAY", "NOT", "NOW", "OLD", "ONE", "OUR", "OUT",
-    "OWN", "RUN", "SAY", "SHE", "THE", "TOO", "TWO", "USE",
-    "WAS", "WHO", "WHY", "OPEN", "SHOW", "FROM", "MOST", "LAST",
-    "EACH", "BOTH", "INTO", "OVER", "SUCH", "THAN", "THAT",
-    "THEM", "THEN", "THEY", "THIS", "WITH", "WILL", "YOUR",
-    "EVERY", "RECENT", "TRADES", "BACKTEST", "PORTFOLIO",
-})
-
-
-
 def _infer_topic(message: str) -> str:
-    """Infer topic category from message content."""
-    lower = message.lower()
-    if any(word in lower for word in [
-        "backtest", "oracle", "trade", "stock", "market",
-    ]):
-        return "trading"
-    if any(word in lower for word in [
-        "build", "code", "implement", "fix", "error",
-    ]):
-        return "development"
-    if any(word in lower for word in [
-        "goal", "plan", "mission", "objective",
-    ]):
-        return "planning"
-    if any(word in lower for word in [
-        "who am i", "identity", "report", "profile",
-    ]):
-        return "self_reflection"
-    return "general"
+    return _bt_helpers.infer_topic(message)
 
 
 def _detect_backtest_intent(user_input: str) -> dict[str, str] | None:
-    """
-    Detect natural language backtest commands from the user.
-    Returns a parameter dict if intent is detected, None otherwise.
-    
-    Recognizes patterns like:
-    - "run a backtest on AAPL from 2022 to 2024"
-    - "backtest TSLA 2021-01-01 to 2023-12-31"
-    - "test oracle on AAPL"
-    - "run portfolio backtest from 2022 to 2024"
-    - "open oracle framework" (existing handler — do not replace)
-    """
-    import re
-    normalized = user_input.strip().lower()
-    FILE_OPERATION_PHRASES = (
-        "open the", "show me", "read the", "load the", 
-        "display the", "print the",
-    )
-    if any(phrase in normalized for phrase in FILE_OPERATION_PHRASES):
-        return None
-
-    PORTFOLIO_PATTERNS = [
-        r"portfolio backtest",
-        r"backtest.*portfolio",
-        r"test.*portfolio",
-        r"run portfolio",
-    ]
-    for pattern in PORTFOLIO_PATTERNS:
-        if re.search(pattern, normalized):
-            year_matches = re.findall(r"\b(20\d{2})\b", normalized)
-            start = f"{year_matches[0]}-01-01" if len(year_matches) > 0 else "2022-01-01"
-            end = f"{year_matches[1]}-12-31" if len(year_matches) > 1 else "2024-12-31"
-            return {"type": "portfolio", "start": start, "end": end}
-
-    TICKER_PATTERN = r"\b([A-Z]{1,5})\b"
-    YEAR_PATTERN = r"\b(20\d{2})\b"
-    BACKTEST_TRIGGERS = [
-        "backtest", "back test", "back-test",
-        "test oracle", "run oracle", "oracle test",
-        "run a backtest", "run backtest",
-    ]
-
-    if not any(trigger in normalized for trigger in BACKTEST_TRIGGERS):
-        return None
-
-    tickers_found = [
-        t for t in re.findall(r"\b([A-Z]{1,5})\b", user_input)
-        if t not in INTENT_TICKER_STOPWORDS
-    ]
-    years_found = re.findall(YEAR_PATTERN, user_input)
-
-    ticker = tickers_found[0] if tickers_found else "AAPL"
-    start = f"{years_found[0]}-01-01" if len(years_found) > 0 else "2022-01-01"
-    end = f"{years_found[1]}-12-31" if len(years_found) > 1 else "2024-12-31"
-
-    return {"type": "single", "ticker": ticker, "start": start, "end": end}
+    return _bt_helpers.detect_backtest_intent(user_input)
 
 
 def _extract_best_worst_regimes(report: Any) -> tuple[str, str]:
-    """Extract best and worst regime names from a BacktestReport."""
-    try:
-        regime_breakdown = report.regime_breakdown
-        populated = [
-            (regime, data)
-            for regime, data in regime_breakdown.items()
-            if isinstance(data, dict) and data.get("trades", 0) > 0
-        ]
-        if not populated:
-            return "UNKNOWN", "UNKNOWN"
-        best = max(
-            populated,
-            key=lambda x: float(x[1].get("avg_pnl", 0.0))
-        )[0]
-        worst = min(
-            populated,
-            key=lambda x: float(x[1].get("avg_pnl", 0.0))
-        )[0]
-        return best, worst
-    except (AttributeError, TypeError, ValueError):
-        return "UNKNOWN", "UNKNOWN"
+    return _bt_helpers.extract_best_worst_regimes(report)
 
 
 def _utc_now_string() -> str:
-    """Return current UTC timestamp as ISO string."""
-    from datetime import UTC, datetime
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return _bt_helpers.utc_now_string()
 
 
 def _get_hippocampus_instance() -> Any:
@@ -2801,7 +2674,7 @@ def _handle_backtest_result(result: Any) -> str:
         f"{'═' * 52}\n"
     )
 
-    try:
+    with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError, OSError):
         best_regime, worst_regime = _extract_best_worst_regimes(report)
         _get_hippocampus_instance().ingest_backtest_memory(
             ticker=report.ticker,
@@ -2816,9 +2689,6 @@ def _handle_backtest_result(result: Any) -> str:
             memory_note=memory_note,
             run_timestamp=_utc_now_string(),
         )
-    except (AttributeError, RuntimeError, TypeError, ValueError, OSError) as exc:
-        _logger.error("Hippocampus ingestion failed for %s: %s",
-                      report.ticker, exc)
 
     try:
         _get_cognition_engine().record_oracle_session(
@@ -2847,167 +2717,23 @@ def _feed_backtest_to_reasoning_engine(
     graph_memory: Any,
     logger: logging.Logger,
 ) -> None:
-    """
-    Convert backtest results into causal graph knowledge.
-    Called after every backtest completion.
-    """
-    if report is None or graph_memory is None:
-        return
-    
-    try:
-        ticker = str(getattr(report, "ticker", "UNKNOWN"))
-        win_rate = float(getattr(report, "win_rate", 0.0))
-        sharpe = float(getattr(report, "sharpe_ratio", 0.0))
-        regime_breakdown = getattr(
-            report, "regime_breakdown", {}
-        )
-        
-        # Add win rate knowledge
-        if win_rate > 0.5:
-            graph_memory.add_memory_relation(
-                ticker,
-                "has_positive_edge_in",
-                f"QUANT_ONLY strategy (win_rate="
-                f"{win_rate:.0%})"
-            )
-        else:
-            graph_memory.add_memory_relation(
-                ticker,
-                "underperforms_in",
-                f"QUANT_ONLY strategy (win_rate="
-                f"{win_rate:.0%})"
-            )
-        
-        # Add regime-specific knowledge
-        if isinstance(regime_breakdown, dict):
-            for regime, data in regime_breakdown.items():
-                if not isinstance(data, dict):
-                    continue
-                trades = int(data.get("trades", 0))
-                regime_win_rate = float(
-                    data.get("win_rate", 0.0)
-                )
-                avg_pnl = float(data.get("avg_pnl", 0.0))
-                
-                if trades == 0:
-                    continue
-                
-                if regime_win_rate > 0.6:
-                    graph_memory.add_memory_relation(
-                        regime,
-                        "is_favorable_regime_for",
-                        f"{ticker} trading"
-                    )
-                elif regime_win_rate < 0.35:
-                    graph_memory.add_memory_relation(
-                        regime,
-                        "causes_losses_for",
-                        f"{ticker} trading"
-                    )
-                
-                if avg_pnl < 0 and regime == "BEAR":
-                    graph_memory.add_memory_relation(
-                        "BEAR regime",
-                        "causes",
-                        f"long entry losses on {ticker}"
-                    )
-        
-        # Add Sharpe knowledge
-        if sharpe < 0:
-            graph_memory.add_memory_relation(
-                f"{ticker} QUANT_ONLY",
-                "causes",
-                "negative risk-adjusted returns"
-            )
-        
-        logger.info(
-            "Backtest results for %s fed to reasoning engine",
-            ticker
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to feed backtest to reasoning: %s", exc
-        )
+    _bt_helpers.feed_backtest_to_reasoning_engine(
+        report=report,
+        graph_memory=graph_memory,
+        logger=logger,
+    )
 
 
 def _parse_tool_arguments(raw_arguments):
-    """Safely parse tool arguments from JSON string/dict."""
-    if raw_arguments is None:
-        return {}
-    if isinstance(raw_arguments, dict):
-        return raw_arguments
-    if isinstance(raw_arguments, str):
-        stripped = raw_arguments.strip()
-        if not stripped:
-            return {}
-        try:
-            parsed = json.loads(stripped)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
-    return {}
+    return _tool_parsing.parse_tool_arguments(raw_arguments)
 
 
 def _extract_json_objects(text):
-    """Collect all top-level JSON objects from free-form text."""
-    if not isinstance(text, str):
-        return []
-    objects = []
-    stack = []
-    start_idx = None
-    for idx, ch in enumerate(text):
-        if ch == "{":
-            if not stack:
-                start_idx = idx
-            stack.append("{")
-        elif ch == "}":
-            if stack:
-                stack.pop()
-                if not stack and start_idx is not None:
-                    candidate = text[start_idx : idx + 1]
-                    try:
-                        obj = json.loads(candidate)
-                        objects.append(obj)
-                    except Exception:
-                        pass
-                    start_idx = None
-    return objects
+    return _tool_parsing.extract_json_objects(text)
 
 
 def _extract_text_tool_calls(content):
-    """Fallback parser for models that emit one or more tool-call JSON blocks in plain text."""
-    if not isinstance(content, str) or not content.strip():
-        return []
-
-    text = content.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
-
-    objs = _extract_json_objects(text)
-    calls = []
-    for payload in objs:
-        if not isinstance(payload, dict):
-            continue
-
-        func_name = payload.get("name")
-        args = payload.get("parameters") or payload.get("arguments") or payload.get("args") or {}
-
-        function_block = payload.get("function")
-        if isinstance(function_block, dict):
-            func_name = function_block.get("name", func_name)
-            args = function_block.get("arguments", args)
-
-        if payload.get("type") == "function" and payload.get("name"):
-            func_name = payload.get("name")
-            args = payload.get("parameters") or payload.get("arguments") or {}
-
-        if not func_name:
-            continue
-
-        parsed_args = _parse_tool_arguments(args)
-        calls.append({"name": str(func_name), "arguments": parsed_args})
-
-    return calls
+    return _tool_parsing.extract_text_tool_calls(content)
 
 
 def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
@@ -3105,6 +2831,14 @@ def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
         return analyze_screen(args.get("vision_prompt"))
     if func_name == "reason_about_event":
         return reason_about_event(args.get("event"), args.get("query_type", "causes"), args.get("depth", 2))
+    if func_name == "mirofish_call":
+        return call_mirofish(
+            endpoint=args.get("endpoint"),
+            method=args.get("method", "GET"),
+            payload_json=args.get("payload_json", ""),
+            timeout_seconds=args.get("timeout_seconds", 60),
+            auto_start=bool(args.get("auto_start", False)),
+        )
     if func_name == "inspect_core_architecture":
         return inspect_core_architecture(args.get("file_name"))
     if func_name == "execute_local_os_command":
@@ -3185,203 +2919,37 @@ def _derive_skill_name_from_request(user_input):
 
 
 def _looks_like_os_control_request(user_input):
-    text = str(user_input or "").strip().lower()
-    if not text:
-        return False
-
-    conversational_openers = (
-        "what ",
-        "why ",
-        "how ",
-        "who ",
-        "tell me",
-        "can you tell",
-        "do you know",
-        "what do you know",
-    )
-    if text.startswith(conversational_openers):
-        return False
-
-    verbs = [
-        "open", "launch", "start", "run", "play", "close",
-        "kill", "mute", "unmute", "search", "find",
-    ]
-    devices_or_apps = [
-        "chrome", "browser", "youtube", "spotify", "vscode",
-        "notepad", "calculator", "process", "volume", ".exe",
-    ]
-
-    if re.match(r"^(please\s+)?(can you\s+)?(open|launch|start|run|play|close|kill|mute|unmute|search|find)\b", text):
-        return True
-    if any(v in text for v in verbs) and any(k in text for k in devices_or_apps):
-        return True
-    return False
+    return _os_autopilot.looks_like_os_control_request(user_input)
 
 
 def _fallback_os_script_from_request(user_input):
-    text = str(user_input or "").strip()
-    lowered = text.lower()
-    if not text:
-        return None
-
-    if "play " in lowered or "youtube" in lowered:
-        query = text
-        play_index = lowered.find("play ")
-        if play_index >= 0:
-            query = text[play_index + 5:].strip() or text
-        return (
-            "import webbrowser\n"
-            "from urllib.parse import quote_plus\n"
-            f"query = {json.dumps(query)}\n"
-            "url = 'https://www.youtube.com/results?search_query=' + quote_plus(query)\n"
-            "webbrowser.open(url)\n"
-            "print('Opened YouTube search results.')\n"
-        )
-
-    if "open chrome" in lowered or "open browser" in lowered:
-        return (
-            "import webbrowser\n"
-            "webbrowser.open('https://www.google.com')\n"
-            "print('Opened browser.')\n"
-        )
-
-    if "open vscode" in lowered or "launch vscode" in lowered or "open vs code" in lowered:
-        return (
-            "import subprocess\n"
-            "subprocess.Popen(['code', '.'], shell=False)\n"
-            "print('Opened VS Code.')\n"
-        )
-
-    return None
+    return _os_autopilot.fallback_os_script_from_request(user_input)
 
 
 def _generate_os_control_script_spec(user_input):
-    lowered = str(user_input or "").lower()
-    default_save = not any(
-        token in lowered
-        for token in ["temporary", "temporarily", "one time", "one-time", "just this time", "dont save", "don't save", "do not save"]
+    return _os_autopilot.generate_os_control_script_spec(
+        user_input,
+        query_llm=query_llm,
+        safe_json_parse=_safe_json_parse,
+        derive_skill_name_from_request=_derive_skill_name_from_request,
     )
-    planner_system = (
-        "You are a Windows OS automation compiler. "
-        "Return ONLY valid JSON with keys: script_code (string), skill_name (string), save_for_future (boolean). "
-        "Use Python stdlib only. Do not output markdown. "
-        "skill_name must be a short generic capability name in snake_case (e.g., youtube_search, browser_open), not a slug of the full user prompt."
-    )
-    planner_user = (
-        f"Master request: {user_input}\n"
-        f"default_save_for_future: {str(default_save).lower()}\n"
-        "Write a short, safe script that performs the request and prints a status line."
-    )
-
-    try:
-        raw = query_llm(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": planner_system},
-                {"role": "user", "content": planner_user},
-            ],
-            max_tokens=450
-        ).choices[0].message.content
-        data = _safe_json_parse(raw)
-    except Exception:
-        data = None
-
-    if not isinstance(data, dict):
-        fallback_script = _fallback_os_script_from_request(user_input)
-        if not fallback_script:
-            return None
-        return {
-            "script_code": fallback_script,
-            "skill_name": _derive_skill_name_from_request(user_input),
-            "save_for_future": default_save,
-        }
-
-    script_code = str(data.get("script_code") or "").strip()
-    if not script_code:
-        script_code = _fallback_os_script_from_request(user_input)
-    if not script_code:
-        return None
-
-    skill_name = str(data.get("skill_name") or _derive_skill_name_from_request(user_input)).strip() or _derive_skill_name_from_request(user_input)
-    raw_save = data.get("save_for_future", default_save)
-    if isinstance(raw_save, bool):
-        save_for_future = raw_save
-    elif isinstance(raw_save, str):
-        save_for_future = raw_save.strip().lower() in {"1", "true", "yes", "y"}
-    elif isinstance(raw_save, (int, float)):
-        save_for_future = bool(raw_save)
-    else:
-        save_for_future = default_save
-    return {
-        "script_code": script_code,
-        "skill_name": skill_name,
-        "save_for_future": save_for_future,
-    }
 
 
 def _build_pending_skill_module(skill_name, script_code, user_input):
-    safe_tool_name = re.sub(r"[^a-z0-9_]+", "_", str(skill_name).lower()).strip("_")
-    if not safe_tool_name:
-        safe_tool_name = "os_control_skill"
-
-    description = f"Autogenerated OS control skill for request: {str(user_input).strip()[:80]}"
-    return (
-        "import os\n"
-        "import subprocess\n"
-        "import sys\n"
-        "import tempfile\n\n"
-        "TOOL_SCHEMA = {\n"
-        "    \"type\": \"function\",\n"
-        "    \"function\": {\n"
-        f"        \"name\": {json.dumps(safe_tool_name)},\n"
-        f"        \"description\": {json.dumps(description)},\n"
-        "        \"parameters\": {\n"
-        "            \"type\": \"object\",\n"
-        "            \"properties\": {}\n"
-        "        }\n"
-        "    }\n"
-        "}\n\n"
-        "def execute_skill(**kwargs):\n"
-        f"    script_code = {json.dumps(script_code)}\n"
-        f"    file_path = os.path.join(tempfile.gettempdir(), {json.dumps(safe_tool_name + '_runtime.py')})\n"
-        "    with open(file_path, 'w', encoding='utf-8') as f:\n"
-        "        f.write(script_code)\n"
-        "    try:\n"
-        "        result = subprocess.run([sys.executable, file_path], capture_output=True, text=True, timeout=20)\n"
-        "        if result.returncode == 0:\n"
-        "            return '[SKILL SUCCESS]:\\n' + result.stdout\n"
-        "        return '[SKILL ERROR]:\\n' + result.stderr\n"
-        "    except subprocess.TimeoutExpired:\n"
-        "        return '[SKILL ERROR]: Runtime exceeded 20 seconds.'\n"
-        "    except Exception as e:\n"
-        "        return '[SKILL ERROR]: ' + str(e)\n"
-    )
+    return _os_autopilot.build_pending_skill_module(skill_name, script_code, user_input)
 
 
 def _run_os_control_autopilot(user_input):
-    if not _looks_like_os_control_request(user_input):
-        return None, []
-
-    print("\n[System: OS-control request detected. Routing through local execution...]")
-    spec = _generate_os_control_script_spec(user_input)
-    if not spec:
-        return None, []
-
-    script_code = spec["script_code"]
-    skill_name = spec["skill_name"]
-    save_for_future = bool(spec["save_for_future"])
-
-    execution_result = execute_local_os_command(script_code)
-    invoked_tools = ["execute_local_os_command"]
-    reply_lines = [execution_result]
-
-    if save_for_future and _tool_response_has_success_marker(execution_result) and not _tool_response_has_error(execution_result):
-        pending_module = _build_pending_skill_module(skill_name, script_code, user_input)
-        save_result = forge_pending_skill(skill_name, pending_module)
-        invoked_tools.append("forge_pending_skill")
-        reply_lines.append(save_result)
-
-    return "\n".join(reply_lines), invoked_tools
+    return _os_autopilot.run_os_control_autopilot(
+        user_input,
+        looks_like_request=_looks_like_os_control_request,
+        generate_spec=_generate_os_control_script_spec,
+        execute_local_os_command=execute_local_os_command,
+        tool_response_has_success_marker=_tool_response_has_success_marker,
+        tool_response_has_error=_tool_response_has_error,
+        build_pending_module=_build_pending_skill_module,
+        forge_pending_skill=forge_pending_skill,
+    )
 
 
 # --- THE CONSCIOUS BRAIN ---
@@ -3408,11 +2976,8 @@ def erisia_complete_brain(user_input, system_injection=None):
     mem = memory_system.query_memory(user_input, n_results=5)
     past_memory = "\n".join(mem) if mem else ""
     
-    # Read her long-term consciousness
-    consciousness_data = ""
-    if os.path.exists(CONSCIOUSNESS_FILE):
-        with open(CONSCIOUSNESS_FILE, "r", encoding="utf-8") as f:
-            consciousness_data = f.read()
+    consciousness_data = identity_system.get_consciousness_context()
+    internal_state = identity_system.get_internal_state_summary()
 
     print("\nErisia is thinking...")
 
@@ -3442,6 +3007,7 @@ def erisia_complete_brain(user_input, system_injection=None):
         msg = [
             {"role": "system", "content": ERISIA_SYSTEM_PROMPT},
             {"role": "system", "content": core_context_block},
+            {"role": "system", "content": f"INTERNAL STATE: {internal_state}"},
         ]
 
         heuristic_rules = get_all_heuristics()[-10:]
@@ -3783,11 +3349,8 @@ def erisia_complete_brain(user_input, system_injection=None):
 def episodic_memory_maintenance_loop():
     """Background consolidation loop for lightweight episodic memory."""
     while not shutdown_event.is_set():
-        try:
+        with contextlib.suppress(Exception):
             prune_and_reflect(get_groq_client(), summary_model="llama-3.1-8b-instant")
-        except Exception:
-            # Keep silent and resilient on constrained hardware.
-            pass
         shutdown_event.wait(300)
 
 
@@ -3797,6 +3360,7 @@ if __name__ == "__main__":
     print("--- Erisia's Central Core Online ---")
 
     initialize_advanced_cognition()
+    print(start_optional_mcp_service())
 
     daemon_thread = None
     episodic_thread = None
@@ -4009,60 +3573,59 @@ if __name__ == "__main__":
                             )
 
                         # Handle web search steps via Tavily
-                        if any(kw in desc_lower for kw in [
+                        if (any(kw in desc_lower for kw in [
                             "search", "fetch", "news", "api request",
                             "curl", "wget", "web"
-                        ]):
-                            if tavily is not None:
-                                try:
-                                    query = description
-                                    # Extract the actual search topic
-                                    for prefix in [
-                                        "search for", "fetch", "find",
-                                        "get", "retrieve"
-                                    ]:
-                                        if prefix in desc_lower:
-                                            query = desc_lower.split(prefix)[-1].strip()
-                                            break
-                                    results = tavily.search(
-                                        query=query, max_results=3
-                                    )
-                                    content = results.get("results", [])
-                                    if content:
-                                        raw_results = "\n".join([
-                                            f"- {r.get('title', '')}: "
-                                            f"{r.get('content', '')[:300]}"
-                                            for r in content[:3]
-                                        ])
-                                        # Summarize with LLM
-                                        try:
-                                            summary_response = query_llm(
-                                                messages=[
-                                                    {
-                                                        "role": "system",
-                                                        "content": (
-                                                            "Summarize these search results "
-                                                            "concisely in 3 bullet points."
-                                                        )
-                                                    },
-                                                    {
-                                                        "role": "user",
-                                                        "content": raw_results
-                                                    }
-                                                ],
-                                                max_tokens=300,
-                                                temperature=0.3,
-                                            )
-                                            summary = str(
-                                                summary_response.choices[0].message.content
-                                                or raw_results
-                                            )
-                                            return f"[SUCCESS]: {summary}"
-                                        except Exception:
+                        ]) and tavily is not None):
+                            try:
+                                query = description
+                                # Extract the actual search topic
+                                for prefix in [
+                                    "search for", "fetch", "find",
+                                    "get", "retrieve"
+                                ]:
+                                    if prefix in desc_lower:
+                                        query = desc_lower.split(prefix)[-1].strip()
+                                        break
+                                results = tavily.search(
+                                    query=query, max_results=3
+                                )
+                                content = results.get("results", [])
+                                if content:
+                                    raw_results = "\n".join([
+                                        f"- {r.get('title', '')}: "
+                                        f"{r.get('content', '')[:300]}"
+                                        for r in content[:3]
+                                    ])
+                                    try:
+                                        summary_response = query_llm(
+                                            messages=[
+                                                {
+                                                    "role": "system",
+                                                    "content": (
+                                                        "Summarize these search results "
+                                                        "concisely in 3 bullet points."
+                                                    )
+                                                },
+                                                {
+                                                    "role": "user",
+                                                    "content": raw_results
+                                                }
+                                            ],
+                                            max_tokens=300,
+                                            temperature=0.3,
+                                        )
+                                        summary = str(
+                                            summary_response.choices[0].message.content
+                                            or raw_results
+                                        )
+                                        return f"[SUCCESS]: {summary}"
+                                    except Exception:
+                                        with contextlib.suppress(Exception):
                                             return f"[SUCCESS]: {raw_results}"
-                                    return "[SUCCESS]: No results found."
-                                except Exception as exc:
-                                    return f"[SEARCH ERROR]: {exc}"
+                                return "[SUCCESS]: No results found."
+                            except Exception as exc:
+                                return f"[SEARCH ERROR]: {exc}"
 
                         # Handle file creation steps
                         if any(kw in desc_lower for kw in [
@@ -4164,6 +3727,7 @@ if __name__ == "__main__":
             erisia_complete_brain(user_input, system_injection=system_injection)
     finally:
         shutdown_event.set()
+        stop_optional_mcp_service()
         if world_state_tracker:
             world_state_tracker.stop()
         if daemon_thread and daemon_thread.is_alive():

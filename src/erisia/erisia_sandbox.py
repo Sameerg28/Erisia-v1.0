@@ -21,6 +21,7 @@ Inspired by OpenJarvis's containerized execution model.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
@@ -115,6 +116,7 @@ def execute_in_docker(
         )
 
     start = time.time()
+    tmp_path = None
 
     try:
         client = docker.from_env()
@@ -186,11 +188,9 @@ def execute_in_docker(
         )
     finally:
         # Clean up temp file
-        try:
-            if "tmp_path" in locals():
+        with contextlib.suppress(OSError):
+            if tmp_path:
                 os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -206,6 +206,7 @@ def execute_in_subprocess(
     Used as fallback when Docker is unavailable.
     """
     start = time.time()
+    tmp_path = None
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -260,11 +261,9 @@ def execute_in_subprocess(
             engine="subprocess",
         )
     finally:
-        try:
-            if "tmp_path" in locals():
+        with contextlib.suppress(OSError):
+            if tmp_path:
                 os.unlink(tmp_path)
-        except OSError:
-            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════

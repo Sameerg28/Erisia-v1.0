@@ -25,6 +25,7 @@ Requirements:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -32,6 +33,10 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 logger = logging.getLogger("erisia.server")
 
@@ -43,21 +48,40 @@ for _p in (_BASE_DIR, _SRC_DIR):
         sys.path.append(str(_p))
 
 
-def create_app(query_handler=None):
+# ═══════════════════════════════════════════════════════════════════════
+# REQUEST/RESPONSE MODELS — Module Scope (fixes Pydantic ForwardRef error)
+# ═══════════════════════════════════════════════════════════════════════
+
+class AskRequest(BaseModel):
+    """Request model for /ask endpoint"""
+    query: str
+    temperature: float = 0.7
+    max_tokens: Optional[int] = None
+
+
+class AskResponse(BaseModel):
+    """Response model for /ask endpoint"""
+    response: str
+    engine: str = "unknown"
+    latency_ms: float = 0.0
+
+
+class GoalItem(BaseModel):
+    """Goal item in goal stack"""
+    title: str
+    priority: float = 0.5
+    status: str = "active"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# APP FACTORY
+# ═══════════════════════════════════════════════════════════════════════
+
+def create_app(query_handler: Optional[Any] = None) -> FastAPI | None:
     """
     Create and configure the FastAPI application.
     Accepts an optional query_handler function for /ask endpoint.
     """
-    try:
-        from fastapi import FastAPI, HTTPException
-        from fastapi.middleware.cors import CORSMiddleware
-        from pydantic import BaseModel
-    except ImportError:
-        logger.warning(
-            "FastAPI not installed. Run: pip install fastapi uvicorn"
-        )
-        return None
-
     app = FastAPI(
         title="Erisia v0.2 API",
         description="REST API for remote control of the Erisia AGI system",
@@ -73,27 +97,10 @@ def create_app(query_handler=None):
         allow_headers=["*"],
     )
 
-    # ── Request/Response Models ──────────────────────────────────────
-
-    class AskRequest(BaseModel):
-        query: str
-        temperature: float = 0.7
-        max_tokens: Optional[int] = None
-
-    class AskResponse(BaseModel):
-        response: str
-        engine: str = "unknown"
-        latency_ms: float = 0.0
-
-    class GoalItem(BaseModel):
-        title: str
-        priority: float = 0.5
-        status: str = "active"
-
     # ── Endpoints ────────────────────────────────────────────────────
 
     @app.get("/")
-    def root():
+    def root() -> dict[str, Any]:
         return {
             "name": "Erisia",
             "version": "0.2",
@@ -105,7 +112,7 @@ def create_app(query_handler=None):
         }
 
     @app.post("/ask", response_model=AskResponse)
-    def ask(req: AskRequest):
+    def ask(req: AskRequest) -> AskResponse:
         if not query_handler:
             raise HTTPException(
                 status_code=503,
@@ -123,16 +130,15 @@ def create_app(query_handler=None):
             raise HTTPException(status_code=500, detail=str(exc))
 
     @app.get("/health")
-    def health():
-        try:
+    def health() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_doctor import run_diagnostic
             return run_diagnostic()
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Health check failed"}
 
     @app.get("/goals")
-    def goals():
-        try:
+    def goals() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_config import get_config
             from erisia.erisia_cognition import GoalStack
 
@@ -150,12 +156,11 @@ def create_app(query_handler=None):
                     for g in focus
                 ],
             }
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Could not retrieve goals"}
 
     @app.get("/skills")
-    def skills():
-        try:
+    def skills() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_config import get_config
             cfg = get_config()
             skills_dir = cfg.paths.skills_dir
@@ -168,21 +173,18 @@ def create_app(query_handler=None):
             registry = {}
             reg_file = skills_dir / "_registry.json"
             if reg_file.exists():
-                try:
+                with contextlib.suppress(Exception):
                     registry = json.loads(reg_file.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
 
             return {
                 "active": active,
                 "pending": pending,
                 "registry_count": len(registry),
             }
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Could not retrieve skills"}
 
     @app.post("/approve/{skill_name}")
-    def approve(skill_name: str):
+    def approve(skill_name: str) -> dict[str, Any]:
         try:
             from erisia.erisia_skills import approve_skill
             result = approve_skill(skill_name)
@@ -191,7 +193,7 @@ def create_app(query_handler=None):
             raise HTTPException(status_code=500, detail=str(exc))
 
     @app.post("/reject/{skill_name}")
-    def reject(skill_name: str):
+    def reject(skill_name: str) -> dict[str, Any]:
         try:
             from erisia.erisia_skills import reject_skill
             result = reject_skill(skill_name)
@@ -200,8 +202,8 @@ def create_app(query_handler=None):
             raise HTTPException(status_code=500, detail=str(exc))
 
     @app.get("/telemetry")
-    def telemetry():
-        try:
+    def telemetry() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_telemetry import get_telemetry_store
             store = get_telemetry_store()
             return {
@@ -209,21 +211,19 @@ def create_app(query_handler=None):
                 "weekly": store.daily_summary(days=7),
                 "engine_distribution": store.engine_distribution(days=7),
             }
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Could not retrieve telemetry"}
 
     @app.get("/learning")
-    def learning():
-        try:
+    def learning() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_learning import get_learning_loop
             loop = get_learning_loop()
             return loop.analyze()
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Could not retrieve learning data"}
 
     @app.get("/events")
-    def events():
-        try:
+    def events() -> dict[str, Any]:
+        with contextlib.suppress(Exception):
             from erisia.erisia_events import get_event_bus
             bus = get_event_bus()
             recent = bus.recent_events(limit=30)
@@ -239,8 +239,7 @@ def create_app(query_handler=None):
                     for e in recent
                 ],
             }
-        except Exception as exc:
-            return {"error": str(exc)}
+        return {"error": "Could not retrieve events"}
 
     return app
 
@@ -251,6 +250,7 @@ def create_app(query_handler=None):
 
 if __name__ == "__main__":
     import argparse
+    import uvicorn
 
     parser = argparse.ArgumentParser(description="Erisia REST API Server")
     parser.add_argument("--port", type=int, default=8420, help="Port (default: 8420)")
@@ -259,15 +259,10 @@ if __name__ == "__main__":
 
     app = create_app()
     if app is None:
-        print("FastAPI not installed. Run: pip install fastapi uvicorn")
+        print("Failed to create FastAPI app")
         sys.exit(1)
 
-    try:
-        import uvicorn
-        print(f"\n  Erisia v0.2 API Server")
-        print(f"  http://{args.host}:{args.port}")
-        print(f"  Docs: http://localhost:{args.port}/docs\n")
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
-    except ImportError:
-        print("uvicorn not installed. Run: pip install uvicorn")
-        sys.exit(1)
+    print(f"\n  Erisia v0.2 API Server")
+    print(f"  http://{args.host}:{args.port}")
+    print(f"  Docs: http://localhost:{args.port}/docs\n")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")

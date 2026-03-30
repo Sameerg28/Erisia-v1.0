@@ -578,7 +578,7 @@ class PlanningEngine:
                     step.replan_count += 1
                     try:
                         fallback_result = executor(
-                            step.fallback, ""
+                            step.fallback, step.tool_hint, step_context
                         )
                         step.result = (
                             f"[FALLBACK]: {fallback_result}"
