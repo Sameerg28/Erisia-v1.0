@@ -4,7 +4,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, cast
 
 import pandas as pd
 
@@ -155,8 +155,12 @@ class QuantitativeEngine:
             if value is None:
                 return 0.0
             if isinstance(value, (np.floating, np.integer)):
-                value = value.item()
-            value_f = float(value)
+                scalar: float | int = value.item()
+                value_f = float(scalar)
+            elif isinstance(value, (float, int, str, bytes)):
+                value_f = float(value)
+            else:
+                return 0.0
             if math.isnan(value_f) or math.isinf(value_f):
                 return 0.0
             return value_f
@@ -170,10 +174,10 @@ class QuantitativeEngine:
 
         try:
             data = df.copy()
-            close = pd.to_numeric(data["Close"], errors="coerce")
-            high = pd.to_numeric(data["High"], errors="coerce")
-            low = pd.to_numeric(data["Low"], errors="coerce")
-            volume = pd.to_numeric(data["Volume"], errors="coerce")
+            close = cast(pd.Series, pd.to_numeric(data["Close"], errors="coerce"))
+            high = cast(pd.Series, pd.to_numeric(data["High"], errors="coerce"))
+            low = cast(pd.Series, pd.to_numeric(data["Low"], errors="coerce"))
+            volume = cast(pd.Series, pd.to_numeric(data["Volume"], errors="coerce"))
             data["Close"] = close
             data["High"] = high
             data["Low"] = low
@@ -321,8 +325,13 @@ class QuantitativeEngine:
             data["BB_Pct_B"] = (close - bb_lower) / (bb_upper - bb_lower).replace(0.0, np.nan)
             data["BB_Width_Pct"] = _expanding_rank_pct(data["BB_Width"])
 
-            obv = (np.sign(close.diff()) * volume).fillna(0.0).cumsum()
-            obv_ema = obv.ewm(span=21, adjust=False).mean()
+            price_delta = close.diff()
+            direction = cast(
+                pd.Series,
+                price_delta.gt(0.0).astype(float) - price_delta.lt(0.0).astype(float),
+            )
+            obv = cast(pd.Series, (direction * volume).cumsum())
+            obv_ema = cast(pd.Series, obv.ewm(span=21, adjust=False).mean())
             data["OBV"] = obv
             data["OBV_Trend"] = np.where(obv > obv_ema, 1.0, np.where(obv < obv_ema, -1.0, 0.0))
 

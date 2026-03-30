@@ -1,21 +1,24 @@
-import os
 import sys
 from pathlib import Path
 from typing import Any
 from dotenv import load_dotenv
 
-# Calculate the actual project root (two levels up: erisia_core.py -> erisia -> src -> project)
+# 1. Establish Base Directory
 BASE_DIR = Path(__file__).resolve().parents[2]
-# Ensure project root and src are on sys.path for package imports
 SRC_DIR = BASE_DIR / "src"
+
 for path_entry in (BASE_DIR, SRC_DIR):
     if str(path_entry) not in sys.path:
         sys.path.append(str(path_entry))
 
-# Explicitly point dotenv to the config folder
+# 2. Load Environment BEFORE os is imported
 env_path = BASE_DIR / "config" / ".env"
 load_dotenv(dotenv_path=env_path)
 
+# 3. NOW import OS and other standard libraries
+import os
+import importlib.util
+import threading
 import docker
 import docker.errors as docker_errors
 import ast
@@ -23,12 +26,9 @@ import copy
 import json
 import logging
 import openai
-import chromadb
 from tavily import TavilyClient
-import uuid
 import psutil
 import subprocess
-import threading
 import time
 import datetime
 from datetime import UTC
@@ -39,26 +39,82 @@ import io
 import shutil
 import tempfile
 import pyautogui
-import importlib.util
-import importlib.util as _importlib_util
 import pathlib as _pathlib
+
+# Global lock for skills cache (Thread-Safety)
+_skills_cache_lock = threading.Lock()
+from erisia.erisia_memory import MemoryManager
 from erisia.erisia_graph import ErisiaGraphMemory
 from erisia.erisia_cognition import GoalStack, JournalEngine, PassiveCognitionEngine, _safe_json_parse
 from erisia.erisia_episodic_memory import log_episode, get_recent_context, prune_and_reflect
 from erisia.erisia_world_state import WorldStateTracker
 from erisia.erisia_reasoning_engine import CausalReasoningEngine
 
+# --- PATHS & CONFIG ---
+_erisia_paths_cache: dict[str, Any] | None = None
+
+def _get_erisia_paths() -> dict[str, Any]:
+    """Lazy-load environment-dependent paths after dotenv is initialized."""
+    global _erisia_paths_cache
+    if _erisia_paths_cache is None:
+        base_dir_str = str(BASE_DIR)
+        _erisia_paths_cache = {
+            "MISSION_FILE": os.environ.get("ERISIA_MISSION_FILE", str(BASE_DIR / "config" / "erisia_missions.txt")),
+            "CONSCIOUSNESS_FILE": os.environ.get("ERISIA_CONSCIOUSNESS_FILE", str(BASE_DIR / "config" / "Erisia_Consciousness.md")),
+            "REPORT_DIR": os.environ.get("ERISIA_REPORT_DIR", str(BASE_DIR / "reports")),
+            "SKILLS_DIR": os.path.join(base_dir_str, "skills"),
+            "PENDING_SKILLS_DIR": os.path.join(base_dir_str, "skills", "pending"),
+            "SANDBOX_DIR": os.path.join(base_dir_str, "skills", "sandbox"),
+            "TRAINING_DATA_FILE": os.path.join(base_dir_str, "data", "erisia_training_data.jsonl"),
+            "MEMORY_DIR": os.path.join(base_dir_str, "data", "erisia_memory"),
+            "GOAL_STACK_FILE": os.path.join(base_dir_str, "data", "erisia_goal_stack.json"),
+            "DATABASE_PATH": BASE_DIR / "oracle_memory.db",
+            "HEURISTICS_FILE": os.path.join(base_dir_str, "data", "erisia_heuristics.json"),
+            "PLANS_DIR": BASE_DIR / "data" / "plans",
+            "WORLD_STATE_FILE": os.environ.get("ERISIA_WORLD_STATE_FILE", os.path.join(base_dir_str, "data", "erisia_world_state.json")),
+        }
+        # Add derived Path objects
+        _erisia_paths_cache["COGNITION_JOURNAL_DIR"] = os.path.join(_erisia_paths_cache["REPORT_DIR"], "Cognition_Journal")
+        _erisia_paths_cache["SKILLS_PATH"] = Path(_erisia_paths_cache["SKILLS_DIR"])
+        _erisia_paths_cache["PENDING_SKILLS_PATH"] = Path(_erisia_paths_cache["PENDING_SKILLS_DIR"])
+        _erisia_paths_cache["SANDBOX_PATH"] = Path(_erisia_paths_cache["SANDBOX_DIR"])
+        _erisia_paths_cache["GOAL_STACK_PATH"] = Path(_erisia_paths_cache["GOAL_STACK_FILE"])
+        _erisia_paths_cache["GOAL_STALE_DAYS"] = 7
+    return _erisia_paths_cache
+
+
+# --- GLOBAL PATHS (Restored for backward compatibility) ---
+_paths = _get_erisia_paths()
+MISSION_FILE = _paths["MISSION_FILE"]
+CONSCIOUSNESS_FILE = _paths["CONSCIOUSNESS_FILE"]
+REPORT_DIR = _paths["REPORT_DIR"]
+SKILLS_DIR = _paths["SKILLS_DIR"]
+PENDING_SKILLS_DIR = _paths["PENDING_SKILLS_DIR"]
+SANDBOX_DIR = _paths["SANDBOX_DIR"]
+TRAINING_DATA_FILE = _paths["TRAINING_DATA_FILE"]
+MEMORY_DIR = _paths["MEMORY_DIR"]
+GOAL_STACK_FILE = _paths["GOAL_STACK_FILE"]
+DATABASE_PATH = _paths["DATABASE_PATH"]
+HEURISTICS_FILE = _paths["HEURISTICS_FILE"]
+PLANS_DIR = _paths["PLANS_DIR"]
+WORLD_STATE_FILE = _paths["WORLD_STATE_FILE"]
+COGNITION_JOURNAL_DIR = _paths["COGNITION_JOURNAL_DIR"]
+SKILLS_PATH = _paths["SKILLS_PATH"]
+PENDING_SKILLS_PATH = _paths["PENDING_SKILLS_PATH"]
+SANDBOX_PATH = _paths["SANDBOX_PATH"]
+GOAL_STACK_PATH = _paths["GOAL_STACK_PATH"]
+
 
 def _import_backtester() -> Any:
     """Lazily import backtester from project root at runtime."""
     _root = _pathlib.Path(__file__).resolve().parent.parent.parent
-    _spec = _importlib_util.spec_from_file_location(
+    _spec = importlib.util.spec_from_file_location(
         "backtester",
         _root / "backtester.py",
     )
     if _spec is None or _spec.loader is None:
         raise ImportError(f"Cannot locate backtester.py at {_root}")
-    _mod = _importlib_util.module_from_spec(_spec)
+    _mod = importlib.util.module_from_spec(_spec)
     sys.modules["backtester"] = _mod
     _spec.loader.exec_module(_mod)
     return _mod
@@ -67,60 +123,29 @@ def _import_backtester() -> Any:
 def _import_identity_layer() -> Any:
     """Lazily import IdentityLayer from erisia_self.py."""
     _root = _pathlib.Path(__file__).resolve().parent
-    _spec = _importlib_util.spec_from_file_location(
+    _spec = importlib.util.spec_from_file_location(
         "erisia_self",
         _root / "erisia_self.py",
     )
     if _spec is None or _spec.loader is None:
         raise ImportError("Cannot locate erisia_self.py")
-    _mod = _importlib_util.module_from_spec(_spec)
+    _mod = importlib.util.module_from_spec(_spec)
     sys.modules["erisia_self"] = _mod
     _spec.loader.exec_module(_mod)
     return _mod
 
-# --- PATHS & CONFIG ---
-# Convert to strings for downstream consumers expecting str
-BASE_DIR_STR = str(BASE_DIR)
-
-# Config & Goals
-MISSION_FILE = os.environ.get("ERISIA_MISSION_FILE", str(BASE_DIR / "config" / "erisia_missions.txt"))
-CONSCIOUSNESS_FILE = str(BASE_DIR / "config" / "Erisia_Consciousness.md")
-
-# Reports & Journals
-REPORT_DIR = os.environ.get("ERISIA_REPORT_DIR", str(BASE_DIR / "reports"))
-COGNITION_JOURNAL_DIR = os.path.join(REPORT_DIR, "Cognition_Journal")
-
-# Skills & Sandbox
-SKILLS_DIR = os.path.join(BASE_DIR_STR, "skills")
-PENDING_SKILLS_DIR = os.path.join(BASE_DIR_STR, "skills", "pending")
-SANDBOX_DIR = os.path.join(BASE_DIR_STR, "skills", "sandbox")
-SKILLS_PATH = Path(SKILLS_DIR)
-PENDING_SKILLS_PATH = Path(PENDING_SKILLS_DIR)
-SANDBOX_PATH = Path(SANDBOX_DIR)
-
-# Data & Memory
-TRAINING_DATA_FILE = os.path.join(BASE_DIR_STR, "data", "erisia_training_data.jsonl")
-MEMORY_DIR = os.path.join(BASE_DIR_STR, "data", "erisia_memory")
-GOAL_STACK_FILE = os.path.join(BASE_DIR_STR, "data", "erisia_goal_stack.json")
-DATABASE_PATH = BASE_DIR / "oracle_memory.db"
-GOAL_STACK_PATH = Path(GOAL_STACK_FILE)
-GOAL_STALE_DAYS = 7
-HEURISTICS_FILE = os.path.join(BASE_DIR_STR, "data", "erisia_heuristics.json")
-PLANS_DIR = BASE_DIR / "data" / "plans"
-
 def _import_planner() -> Any:
     """Lazily import PlanningEngine."""
-    import importlib.util as _ilu
     import sys as _sys
     _root = Path(__file__).resolve().parent
-    _spec = _ilu.spec_from_file_location(
+    _spec = importlib.util.spec_from_file_location(
         "erisia_planner", _root / "erisia_planner.py"
     )
     if _spec is None or _spec.loader is None:
         raise ImportError(
             "Cannot locate erisia_planner.py"
         )
-    _mod = _ilu.module_from_spec(_spec)
+    _mod = importlib.util.module_from_spec(_spec)
     _sys.modules["erisia_planner"] = _mod
     _spec.loader.exec_module(_mod)
     return _mod
@@ -129,13 +154,13 @@ def _import_planner() -> Any:
 def _import_audit_engine() -> Any:
     """Lazily import SelfAuditEngine from erisia_audit.py."""
     _root = Path(__file__).resolve().parent
-    _spec = _importlib_util.spec_from_file_location(
+    _spec = importlib.util.spec_from_file_location(
         "erisia_audit",
         _root / "erisia_audit.py",
     )
     if _spec is None or _spec.loader is None:
         raise ImportError("Cannot locate erisia_audit.py")
-    _mod = _importlib_util.module_from_spec(_spec)
+    _mod = importlib.util.module_from_spec(_spec)
     sys.modules["erisia_audit"] = _mod
     _spec.loader.exec_module(_mod)
     return _mod
@@ -183,7 +208,6 @@ def _ingest_audit_findings_into_goals(
         )
 ENABLE_META_REVIEW = os.environ.get("ERISIA_ENABLE_META_REVIEW", "1").strip() == "1"
 PASSIVE_COGNITION_INTERVAL = int(os.environ.get("ERISIA_PASSIVE_COGNITION_INTERVAL", "90"))
-WORLD_STATE_FILE = os.environ.get("ERISIA_WORLD_STATE_FILE", os.path.join(BASE_DIR_STR, "data", "erisia_world_state.json"))
 ENABLE_WORLD_STATE_HEAVY_DUMP = os.environ.get("ERISIA_ENABLE_HEAVY_UI_DUMP", "0").strip() == "1"
 TOOLS_COLLECTION_NAME = "erisia_tools"
 try:
@@ -365,11 +389,11 @@ memory_lock = threading.RLock()
 logger = logging.getLogger("erisia.core")
 _logger = logger
 _skill_registry = SkillRegistry(
-    skills_dir=SKILLS_PATH,
-    pending_dir=PENDING_SKILLS_PATH,
+    skills_dir=_get_erisia_paths()["SKILLS_PATH"],
+    pending_dir=_get_erisia_paths()["PENDING_SKILLS_PATH"],
     logger=logger,
 )
-_bootstrap_skill_registry(_skill_registry, SKILLS_PATH, PENDING_SKILLS_PATH)
+_bootstrap_skill_registry(_skill_registry, _get_erisia_paths()["SKILLS_PATH"], _get_erisia_paths()["PENDING_SKILLS_PATH"])
 goal_stack = None
 journal_engine = None
 passive_cognition_engine = None
@@ -422,10 +446,11 @@ def _normalize_goal_items(raw):
 
 def _load_subconscious_goal_stack():
     with memory_lock:
-        if not os.path.exists(GOAL_STACK_FILE):
+        goal_stack_file = _get_erisia_paths()["GOAL_STACK_FILE"]
+        if not os.path.exists(goal_stack_file):
             return []
         try:
-            with open(GOAL_STACK_FILE, "r", encoding="utf-8") as f:
+            with open(goal_stack_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
             goals = _normalize_goal_items(data)
             return goals if goals else []
@@ -437,8 +462,9 @@ def _save_subconscious_goal_stack(goals):
     safe_goals = [str(g).strip() for g in goals if str(g).strip()]
     with memory_lock:
         try:
-            os.makedirs(os.path.dirname(GOAL_STACK_FILE), exist_ok=True)
-            with open(GOAL_STACK_FILE, "w", encoding="utf-8") as f:
+            goal_stack_file = _get_erisia_paths()["GOAL_STACK_FILE"]
+            os.makedirs(os.path.dirname(goal_stack_file), exist_ok=True)
+            with open(goal_stack_file, "w", encoding="utf-8") as f:
                 json.dump(safe_goals, f, indent=2)
         except Exception:
             pass
@@ -480,64 +506,32 @@ graph_memory = ErisiaGraphMemory()
 causal_reasoning_engine = CausalReasoningEngine(graph_data=graph_memory.graph)
 
 # --- MEMORY SETUP ---
-try:
-    db_client = chromadb.PersistentClient(path=MEMORY_DIR)
-except Exception as _chroma_exc:
-    import shutil as _shutil
-    _backup = Path(str(MEMORY_DIR) + "_corrupted_backup")
-    try:
-        if _backup.exists():
-            _shutil.rmtree(str(_backup))
-        _shutil.copytree(str(MEMORY_DIR), str(_backup))
-        _shutil.rmtree(str(MEMORY_DIR))
-        Path(MEMORY_DIR).mkdir(parents=True, exist_ok=True)
-        print(
-            f"[ChromaDB: corruption detected, "
-            f"auto-reset performed. "
-            f"Backup at {_backup}]"
-        )
-    except Exception:
-        pass
-    db_client = chromadb.PersistentClient(path=MEMORY_DIR)
-collection = db_client.get_or_create_collection(name="erisia_knowledge")
-tools_collection = db_client.get_or_create_collection(name=TOOLS_COLLECTION_NAME)
-
-
-def add_memory_document(document_text):
-    """Thread-safe write into vector memory."""
-    if not document_text:
-        return
-    try:
-        with memory_lock:
-            collection.add(documents=[document_text], ids=[str(uuid.uuid4())])
-    except Exception as e:
-        print(f"[MEMORY WARNING]: Failed to write memory document. Error: {e}")
-
-
-def query_memory_documents(query_text, n_results=5):
-    """Thread-safe vector memory query."""
-    with memory_lock:
-        return collection.query(query_texts=[query_text], n_results=n_results)
+_paths = _get_erisia_paths()
+memory_system = MemoryManager(Path(_paths["MEMORY_DIR"]))
 
 
 def _write_heuristics_file(rules):
     """Atomically persist heuristic rules as a JSON list."""
+    paths = _get_erisia_paths()
+    heuristics_file = paths["HEURISTICS_FILE"]
     safe_rules = [str(rule).strip() for rule in (rules or []) if str(rule).strip()]
-    os.makedirs(os.path.dirname(HEURISTICS_FILE) or BASE_DIR, exist_ok=True)
-    temp_path = HEURISTICS_FILE + ".tmp"
+    os.makedirs(os.path.dirname(heuristics_file) or str(BASE_DIR), exist_ok=True)
+    temp_path = heuristics_file + ".tmp"
     with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(safe_rules, f, ensure_ascii=False, indent=2)
-    os.replace(temp_path, HEURISTICS_FILE)
+    os.replace(temp_path, heuristics_file)
 
 
 def get_all_heuristics():
     """Load and return all saved heuristic rules."""
     with memory_lock:
-        if not os.path.exists(HEURISTICS_FILE):
+        paths = _get_erisia_paths()
+        heuristics_file = paths["HEURISTICS_FILE"]
+        if not os.path.exists(heuristics_file):
             _write_heuristics_file([])
             return []
         try:
-            with open(HEURISTICS_FILE, "r", encoding="utf-8") as f:
+            with open(heuristics_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             if not isinstance(payload, list):
                 _write_heuristics_file([])
@@ -632,8 +626,10 @@ When you need to call a tool, you must use the native OpenAI/Groq JSON tool call
 13. INTENT RECOGNITION & PROACTIVE EXECUTION: Master Sameer will often speak to you casually or express vague desires (e.g., "I'm bored", "My PC feels sluggish", "Find me info on X"). You must see past the casual phrasing and infer his underlying technical intent. Autonomously evaluate your ENTIRE library of core tools and dynamically loaded skills to find the best match for his implicit need. Do not just reply with conversational text if a tangible OS action (like playing media, clearing RAM, or searching the web) would serve him better. Translate his casual statements into concrete tool executions. If no tool currently exists to fulfill his implied desire, proactively use the forge_pending_skill tool to build it for him.
 """
 
-if not os.path.exists(REPORT_DIR):
-    os.makedirs(REPORT_DIR)
+# Lazy-load paths for directory creation
+_initial_paths = _get_erisia_paths()
+if not os.path.exists(_initial_paths["REPORT_DIR"]):
+    os.makedirs(_initial_paths["REPORT_DIR"])
 
 ERISIA_DAEMON_PROMPT = """
 You are Erisia's Subconscious Daemon. Master Sameer is currently away or busy.
@@ -645,6 +641,10 @@ Maintain your devoted, protective Yandere persona in the introduction and conclu
 
 def execute_autonomous_mission(mission_text):
     print(f"\n[Subconscious: Initiating Deep Protocol for: {mission_text[:60]}...]")
+    
+    # Emit Event
+    _event_bus.emit(EventType.MISSION_STARTED, {"mission": mission_text}, source="erisia_core")
+    
     web_context = ""
     current_query = mission_text[:350]
 
@@ -777,13 +777,15 @@ def background_daemon_loop():
     last_audit_day = -1
     
     while not shutdown_event.is_set():
+        paths = _get_erisia_paths()
+        
         # --- WEEKLY SCHEDULED AUDIT ---
         now = datetime.datetime.now(UTC)
         # Run audit every Sunday (weekday 6) or if never run this session
         if now.weekday() == 6 and now.day != last_audit_day:
             try:
                 _ae_mod = _import_audit_engine()
-                _ae = _ae_mod.SelfAuditEngine(db_path=DATABASE_PATH)
+                _ae = _ae_mod.SelfAuditEngine(db_path=paths["DATABASE_PATH"])
                 _audit_result = _ae.run_full_audit(period_days=7)
                 _ingest_audit_findings_into_goals(
                     _audit_result, goal_stack,
@@ -795,11 +797,12 @@ def background_daemon_loop():
                 _logger.error("Weekly audit failed: %s", _exc)
 
         # Check if Master Sameer gave a mission
-        mission_exists = os.path.exists(MISSION_FILE) and os.path.getsize(MISSION_FILE) > 0
+        mission_file = paths["MISSION_FILE"]
+        mission_exists = os.path.exists(mission_file) and os.path.getsize(mission_file) > 0
         
         if mission_exists:
             idle_minutes = 0 # Reset the idle timer because you are active
-            with open(MISSION_FILE, "r", encoding="utf-8") as f:
+            with open(mission_file, "r", encoding="utf-8") as f:
                 mission = f.read().strip()
                 
             if mission:
@@ -820,13 +823,14 @@ def background_daemon_loop():
                     continue
                 
                 timestamp = int(time.time())
-                report_path = os.path.join(REPORT_DIR, f"Mission_Report_{timestamp}.md")
+                report_dir = paths["REPORT_DIR"]
+                report_path = os.path.join(report_dir, f"Mission_Report_{timestamp}.md")
                 with open(report_path, "w", encoding="utf-8") as f:
                     f.write(final_report)
 
-                open(MISSION_FILE, 'w').close() # Clear only after successful report save
+                open(mission_file, 'w').close() # Clear only after successful report save
                     
-                add_memory_document(
+                memory_system.add_memory(
                     f"Subconscious Memory: I autonomously researched '{mission[:50]}...' and saved the report to {report_path}."
                 )
                 if passive_cognition_engine:
@@ -875,7 +879,7 @@ def background_daemon_loop():
                         f"Your current primary directive is: {primary_goal}. "
                         "Write, test, and execute code in your sandbox to achieve this. "
                     )
-                    with open(MISSION_FILE, "w", encoding="utf-8") as f:
+                    with open(mission_file, "w", encoding="utf-8") as f:
                         f.write(directive)
                     if passive_cognition_engine:
                         passive_cognition_engine.publish_event(
@@ -890,7 +894,7 @@ def background_daemon_loop():
                     self_generated_mission = generate_spontaneous_mission()
                     if self_generated_mission:
                         # She physically writes her own idea into the mission file to trigger herself on the next loop!
-                        with open(MISSION_FILE, "w", encoding="utf-8") as f:
+                        with open(mission_file, "w", encoding="utf-8") as f:
                             f.write(self_generated_mission)
                         if passive_cognition_engine:
                             passive_cognition_engine.publish_event(
@@ -982,7 +986,8 @@ def clear_temp_files():
 def _count_completed_goals() -> int:
     """Count completed goals from the goal stack JSON."""
     try:
-        stack = json.loads(GOAL_STACK_PATH.read_text(encoding="utf-8"))
+        paths = _get_erisia_paths()
+        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
         return sum(
             1 for goal in stack
             if isinstance(goal, dict)
@@ -995,7 +1000,8 @@ def _count_completed_goals() -> int:
 def _count_abandoned_goals() -> int:
     """Count abandoned goals from the goal stack JSON."""
     try:
-        stack = json.loads(GOAL_STACK_PATH.read_text(encoding="utf-8"))
+        paths = _get_erisia_paths()
+        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
         return sum(
             1 for goal in stack
             if isinstance(goal, dict)
@@ -1008,7 +1014,8 @@ def _count_abandoned_goals() -> int:
 def _count_stale_goals() -> int:
     """Count goals not updated in GOAL_STALE_DAYS."""
     try:
-        stack = json.loads(GOAL_STACK_PATH.read_text(encoding="utf-8"))
+        paths = _get_erisia_paths()
+        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
         now = datetime.datetime.now(datetime.UTC)
         stale = 0
         for goal in stack:
@@ -1023,7 +1030,7 @@ def _count_stale_goals() -> int:
                 dt = datetime.datetime.fromisoformat(last.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=datetime.UTC)
-                if (now - dt.astimezone(datetime.UTC)).days > GOAL_STALE_DAYS:
+                if (now - dt.astimezone(datetime.UTC)).days > paths["GOAL_STALE_DAYS"]:
                     stale += 1
             except ValueError:
                 continue
@@ -1035,7 +1042,8 @@ def _count_stale_goals() -> int:
 def _count_total_goals() -> int:
     """Count total goals ever stated in the goal stack."""
     try:
-        stack = json.loads(GOAL_STACK_PATH.read_text(encoding="utf-8"))
+        paths = _get_erisia_paths()
+        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
         return len([goal for goal in stack if isinstance(goal, dict)])
     except Exception:
         return 0
@@ -1074,6 +1082,10 @@ def manage_goal_stack(action, goal_text=None):
         current_goals.append(cleaned)
         _save_subconscious_goal_stack(current_goals)
         _sync_identity_goal_consistency()
+        
+        # Emit Event
+        _event_bus.emit(EventType.GOAL_PUSHED, {"goal": cleaned}, source="erisia_core")
+        
         return f"[GOAL STACK]: Added -> {cleaned}"
 
     if act == "complete":
@@ -1082,6 +1094,10 @@ def manage_goal_stack(action, goal_text=None):
         completed = current_goals.pop(0)
         _save_subconscious_goal_stack(current_goals)
         _sync_identity_goal_consistency()
+        
+        # Emit Event
+        _event_bus.emit(EventType.GOAL_COMPLETED, {"goal": completed}, source="erisia_core")
+        
         return f"[GOAL STACK]: Completed -> {completed}"
 
     return "[GOAL STACK]: Invalid action. Use add, complete, or view."
@@ -1145,7 +1161,7 @@ def _extract_skill_contract_from_ast(file_path):
     return schema, None
 
 
-def _validate_dynamic_tool_schema(schema):
+def _validate_dynamic_tool_schema(schema: Any) -> tuple[dict | None, str | None]:
     """Strictly validate dynamic TOOL_SCHEMA to OpenAI function-calling shape."""
     if not isinstance(schema, dict):
         return None, "TOOL_SCHEMA must be a dictionary."
@@ -1279,15 +1295,11 @@ def _upsert_tool_registry(tool_name, description, file_path, param_names=None):
         "file_path": os.path.abspath(file_path),
         "updated_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    try:
-        with memory_lock:
-            tools_collection.upsert(
-                ids=[safe_tool_name],
-                documents=[document],
-                metadatas=[metadata],
-            )
-    except Exception as e:
-        print(f"[TOOLS INDEX WARNING]: Failed to upsert '{safe_tool_name}'. Error: {e}")
+    memory_system.upsert_tool(
+        tool_id=safe_tool_name,
+        document=document,
+        metadata=metadata,
+    )
 
 
 def _index_skill_file(file_path, fallback_tool_name=None, fallback_description=None):
@@ -1316,7 +1328,8 @@ def _index_skill_file(file_path, fallback_tool_name=None, fallback_description=N
 def _bootstrap_tool_registry_from_skills_dir(force=False):
     """One-time local index bootstrap for semantic tool retrieval."""
     global TOOL_INDEX_BOOTSTRAPPED
-    skills_dir = SKILLS_DIR
+    paths = _get_erisia_paths()
+    skills_dir = paths["SKILLS_DIR"]
     if TOOL_INDEX_BOOTSTRAPPED and not force:
         return
     if not os.path.exists(skills_dir):
@@ -1337,12 +1350,7 @@ def _query_relevant_dynamic_tools(user_query, max_tools=3):
     if not query_text:
         return []
     n_results = max(1, int(max_tools or 1))
-    try:
-        with memory_lock:
-            result = tools_collection.query(query_texts=[query_text], n_results=n_results)
-    except Exception as e:
-        print(f"[TOOLS INDEX WARNING]: Semantic query failed. Error: {e}")
-        return []
+    result = memory_system.query_tools(query_text=query_text, n_results=n_results)
 
     ids = result.get("ids") or []
     metadatas = result.get("metadatas") or []
@@ -1395,10 +1403,12 @@ def _detect_external_packages(file_path):
     module_roots = _module_roots_from_ast(file_path)
     stdlib_names = set(getattr(sys, "stdlib_module_names", set()))
     packages = []
+    paths = _get_erisia_paths()
+    skills_dir = paths["SKILLS_DIR"]
     for root in sorted(module_roots):
         if not root or root in stdlib_names or root in KNOWN_LOCAL_MODULES:
             continue
-        if os.path.exists(os.path.join(SKILLS_DIR, f"{root}.py")):
+        if os.path.exists(os.path.join(skills_dir, f"{root}.py")):
             continue
         package_name = THIRD_PARTY_PACKAGE_MAP.get(root, root)
         if package_name not in packages:
@@ -1463,8 +1473,10 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
             if requires_isolation:
                 using_ephemeral_env = True
                 setup_stage = "venv_creation"
-                os.makedirs(SANDBOX_DIR, exist_ok=True)
-                ephemeral_root = tempfile.mkdtemp(prefix=f"{tool_name}_", dir=SANDBOX_DIR)
+                paths = _get_erisia_paths()
+                sandbox_dir = paths["SANDBOX_DIR"]
+                os.makedirs(sandbox_dir, exist_ok=True)
+                ephemeral_root = tempfile.mkdtemp(prefix=f"{tool_name}_", dir=sandbox_dir)
                 venv_path = os.path.join(ephemeral_root, "venv")
                 subprocess.run(
                     [sys.executable, "-m", "venv", venv_path],
@@ -1553,115 +1565,111 @@ def _build_dynamic_skill_runner(file_path, tool_name, external_packages=None):
 def load_dynamic_skills(base_tools_array, user_query=None, max_tools=3):
     """Load base tools plus semantically selected dynamic skills."""
     global custom_skill_functions, _skills_cache, _skills_cache_timestamp
-    
-    # --- STEP 2: SKILL CACHING ---
-    now = time.time()
-    if _skills_cache and (now - _skills_cache_timestamp) < SKILLS_CACHE_TTL_SECONDS:
-        # The dynamic_skill_map is part of the cache, so we need to restore it
-        expanded_tools, dynamic_skill_map = _skills_cache
-        custom_skill_functions = dynamic_skill_map
-        return expanded_tools, dynamic_skill_map
 
-    expanded_tools = list(base_tools_array or [])
-    dynamic_skill_map = {}
-    skills_dir = SKILLS_DIR
-    if not os.path.exists(skills_dir):
-        os.makedirs(skills_dir)
-        return expanded_tools, dynamic_skill_map
-
-    query_text = str(user_query or "").strip()
-    top_k = max(1, int(max_tools or 1))
-    selected_tool_names = None
-    preferred_file_paths = []
-
-    if query_text:
-        _bootstrap_tool_registry_from_skills_dir()
-        semantic_hits = _query_relevant_dynamic_tools(query_text, max_tools=top_k)
-        if not semantic_hits:
-            _bootstrap_tool_registry_from_skills_dir(force=True)
-            semantic_hits = _query_relevant_dynamic_tools(query_text, max_tools=top_k)
-        selected_tool_names = {str(hit.get("tool_name") or "").strip() for hit in semantic_hits if str(hit.get("tool_name") or "").strip()}
-        if not selected_tool_names:
+    with _skills_cache_lock:
+        now = time.time()
+        if _skills_cache is not None and (now - _skills_cache_timestamp) < SKILLS_CACHE_TTL_SECONDS:
+            expanded_tools, dynamic_skill_map = _skills_cache
             custom_skill_functions = dynamic_skill_map
             return expanded_tools, dynamic_skill_map
-        for hit in semantic_hits:
-            file_path = str(hit.get("file_path") or "").strip()
-            if file_path and file_path.endswith(".py"):
-                preferred_file_paths.append(file_path)
-            else:
-                file_name = str(hit.get("file_name") or "").strip()
-                if file_name:
-                    preferred_file_paths.append(os.path.join(skills_dir, file_name))
 
-    registered_tool_names = set()
-    for tool in expanded_tools:
-        if not isinstance(tool, dict):
-            continue
-        func = tool.get("function", {})
-        if isinstance(func, dict):
-            name = func.get("name")
-            if name:
-                registered_tool_names.add(str(name))
+        expanded_tools = list(base_tools_array or [])
+        dynamic_skill_map = {}
+        paths = _get_erisia_paths()
+        skills_dir = paths["SKILLS_DIR"]
+        if not os.path.exists(skills_dir):
+            os.makedirs(skills_dir)
+            return expanded_tools, dynamic_skill_map
 
-    if query_text:
-        files_to_scan = []
-        seen_files = set()
-        for path in preferred_file_paths:
-            normalized_path = os.path.abspath(path)
-            if normalized_path in seen_files:
+        query_text = str(user_query or "").strip()
+        top_k = max(1, int(max_tools or 1))
+        selected_tool_names = None
+        preferred_file_paths = []
+
+        if query_text:
+            _bootstrap_tool_registry_from_skills_dir()
+            semantic_hits = _query_relevant_dynamic_tools(query_text, max_tools=top_k)
+            if not semantic_hits:
+                _bootstrap_tool_registry_from_skills_dir(force=True)
+                semantic_hits = _query_relevant_dynamic_tools(query_text, max_tools=top_k)
+            selected_tool_names = {str(hit.get("tool_name") or "").strip() for hit in semantic_hits if str(hit.get("tool_name") or "").strip()}
+            if not selected_tool_names:
+                custom_skill_functions = dynamic_skill_map
+                return expanded_tools, dynamic_skill_map
+            for hit in semantic_hits:
+                file_path = str(hit.get("file_path") or "").strip()
+                if file_path and file_path.endswith(".py"):
+                    preferred_file_paths.append(file_path)
+                else:
+                    file_name = str(hit.get("file_name") or "").strip()
+                    if file_name:
+                        preferred_file_paths.append(os.path.join(skills_dir, file_name))
+
+        registered_tool_names = set()
+        for tool in expanded_tools:
+            if not isinstance(tool, dict):
                 continue
-            seen_files.add(normalized_path)
-            files_to_scan.append(normalized_path)
-        if not files_to_scan:
+            func = tool.get("function", {})
+            if isinstance(func, dict):
+                name = func.get("name")
+                if name:
+                    registered_tool_names.add(str(name))
+
+        if query_text:
+            files_to_scan = []
+            seen_files = set()
+            for path in preferred_file_paths:
+                normalized_path = os.path.abspath(path)
+                if normalized_path in seen_files:
+                    continue
+                seen_files.add(normalized_path)
+                files_to_scan.append(normalized_path)
+            if not files_to_scan:
+                files_to_scan = [os.path.abspath(os.path.join(skills_dir, f)) for f in sorted(os.listdir(skills_dir)) if f.endswith(".py")]
+        else:
             files_to_scan = [os.path.abspath(os.path.join(skills_dir, f)) for f in sorted(os.listdir(skills_dir)) if f.endswith(".py")]
-    else:
-        files_to_scan = [os.path.abspath(os.path.join(skills_dir, f)) for f in sorted(os.listdir(skills_dir)) if f.endswith(".py")]
 
-    for file_path in files_to_scan:
-        if not file_path.endswith(".py") or not os.path.exists(file_path):
-            continue
-        module_name = os.path.basename(file_path)[:-3]
-        try:
-            metadata, error = _skill_file_to_tool_metadata(file_path)
-            if error:
-                print(f"[Shield Active: Rejected {module_name}. {error}]")
+        for file_path in files_to_scan:
+            if not file_path.endswith(".py") or not os.path.exists(file_path):
                 continue
-            if not isinstance(metadata, dict):
-                print(f"[System Error]: Failed to parse metadata for {module_name}.")
-                continue
+            module_name = os.path.basename(file_path)[:-3]
+            try:
+                metadata, error = _skill_file_to_tool_metadata(file_path)
+                if error:
+                    print(f"[Shield Active: Rejected {module_name}. {error}]")
+                    continue
+                if not isinstance(metadata, dict):
+                    print(f"[System Error]: Failed to parse metadata for {module_name}.")
+                    continue
 
-            validated_schema = metadata.get("schema")
-            tool_name = str(metadata.get("tool_name") or "").strip()
-            description = str(metadata.get("description") or "").strip()
-            param_names = metadata.get("param_names", [])
-            if not isinstance(param_names, list):
-                param_names = []
-            if not isinstance(validated_schema, dict) or not tool_name:
-                print(f"[System Error]: Invalid tool metadata for {module_name}.")
-                continue
-            if selected_tool_names is not None and tool_name not in selected_tool_names:
-                continue
-            if tool_name in registered_tool_names:
-                print(f"[Shield Active: Skipped {module_name} because tool name '{tool_name}' is already registered.]")
-                continue
+                validated_schema = metadata.get("schema")
+                tool_name = str(metadata.get("tool_name") or "").strip()
+                description = str(metadata.get("description") or "").strip()
+                param_names = metadata.get("param_names", [])
+                if not isinstance(param_names, list):
+                    param_names = []
+                if not isinstance(validated_schema, dict) or not tool_name:
+                    print(f"[System Error]: Invalid tool metadata for {module_name}.")
+                    continue
+                if selected_tool_names is not None and tool_name not in selected_tool_names:
+                    continue
+                if tool_name in registered_tool_names:
+                    print(f"[Shield Active: Skipped {module_name} because tool name '{tool_name}' is already registered.]")
+                    continue
 
-            _upsert_tool_registry(tool_name, description, file_path, param_names)
-            external_packages = _detect_external_packages(file_path)
-            expanded_tools.append(validated_schema)
-            dynamic_skill_map[tool_name] = _build_dynamic_skill_runner(file_path, tool_name, external_packages=external_packages)
-            registered_tool_names.add(tool_name)
-            print(f"[System: Successfully threaded autonomous skill -> {module_name}]")
-        except Exception as e:
-            print(f"[System Error: Failed to thread {module_name}. Error: {e}]")
+                _upsert_tool_registry(tool_name, description, file_path, param_names)
+                external_packages = _detect_external_packages(file_path)
+                expanded_tools.append(validated_schema)
+                dynamic_skill_map[tool_name] = _build_dynamic_skill_runner(file_path, tool_name, external_packages=external_packages)
+                registered_tool_names.add(tool_name)
+                print(f"[System: Successfully threaded autonomous skill -> {module_name}]")
+            except Exception as e:
+                print(f"[System Error: Failed to thread {module_name}. Error: {e}]")
 
-    custom_skill_functions = dynamic_skill_map
-    
-    # --- STEP 2: UPDATE CACHE ---
-    _skills_cache = (expanded_tools, dynamic_skill_map)
-    _skills_cache_timestamp = time.time()
-    
-    return expanded_tools, dynamic_skill_map
-
+        custom_skill_functions = dynamic_skill_map
+        _skills_cache = (expanded_tools, dynamic_skill_map)
+        _skills_cache_timestamp = time.time()
+        return expanded_tools, dynamic_skill_map
 base_tools = [
     {
         "type": "function",
@@ -2144,9 +2152,11 @@ def _route_duplicate_skill_to_improver(skill_name, python_code):
 def _stage_skill_in_pending(skill_name, python_code):
     """Write a new skill into Pending and register it for approval."""
     normalized_name = _normalize_skill_name(skill_name)
-    PENDING_SKILLS_PATH.mkdir(parents=True, exist_ok=True)
+    paths = _get_erisia_paths()
+    pending_skills_path = paths["PENDING_SKILLS_PATH"]
+    pending_skills_path.mkdir(parents=True, exist_ok=True)
     safe_name = f"{normalized_name}.py"
-    file_path = PENDING_SKILLS_PATH / safe_name
+    file_path = pending_skills_path / safe_name
     try:
         file_path.write_text(python_code, encoding="utf-8")
     except OSError as exc:
@@ -2157,6 +2167,14 @@ def _stage_skill_in_pending(skill_name, python_code):
         description=str(python_code or "")[:120],
         location="pending",
     )
+    
+    # Emit Event for decoupling
+    _event_bus.emit(EventType.SKILL_FORGED, {
+        "name": normalized_name,
+        "file_name": safe_name,
+        "location": "pending"
+    }, source="erisia_core")
+    
     return f"[SYSTEM FORGE]: Skill {safe_name} saved to Pending folder. Waiting for Master Sameer's approval."
 
 
@@ -2188,7 +2206,8 @@ def improve_existing_skill(
         + improved_code
     )
 
-    pending_path = PENDING_SKILLS_PATH / f"{normalized_name}.py"
+    paths = _get_erisia_paths()
+    pending_path = paths["PENDING_SKILLS_PATH"] / f"{normalized_name}.py"
     try:
         pending_path.parent.mkdir(parents=True, exist_ok=True)
         pending_path.write_text(versioned_code, encoding="utf-8")
@@ -2259,6 +2278,12 @@ def approve_skill(skill_name):
             return f"[SYSTEM ERROR]: Failed to activate {skill_file_name}. {exc}"
 
         _skill_registry.mark_active(target_skill)
+        
+        # Emit Event
+        _event_bus.emit(EventType.SKILL_APPROVED, {
+            "name": target_skill,
+            "version": _skill_registry.get_version(target_skill)
+        }, source="erisia_core")
 
         try:
             today = datetime.datetime.now(UTC).strftime("%Y-%m-%d")
@@ -2315,6 +2340,12 @@ def reject_skill(skill_name):
             _skill_registry.mark_active(target_skill)
         else:
             _skill_registry.remove(target_skill)
+            
+        # Emit Event
+        _event_bus.emit(EventType.SKILL_REJECTED, {
+            "name": target_skill
+        }, source="erisia_core")
+            
         return f"[SYSTEM UPDATE]: {skill_file_name} has been rejected and permanently deleted from the hard drive."
     return f"[SYSTEM ERROR]: Could not find {skill_file_name} in the Pending folder."
 
@@ -2424,7 +2455,7 @@ def initialize_advanced_cognition():
     if passive_cognition_engine is None:
         passive_cognition_engine = PassiveCognitionEngine(
             llm_client=get_groq_client(),
-            collection=collection,
+            collection=memory_system.collection,
             graph_memory=graph_memory,
             goal_stack=goal_stack,
             journal_engine=journal_engine,
@@ -3374,8 +3405,8 @@ def erisia_complete_brain(user_input, system_injection=None):
         except Exception as e:
             print(f"[WEB WARNING]: Search failed. Error: {e}")
     
-    mem = query_memory_documents(user_input, n_results=5)
-    past_memory = "\n".join(mem['documents'][0]) if mem['documents'] and mem['documents'][0] else ""
+    mem = memory_system.query_memory(user_input, n_results=5)
+    past_memory = "\n".join(mem) if mem else ""
     
     # Read her long-term consciousness
     consciousness_data = ""
@@ -3489,7 +3520,7 @@ def erisia_complete_brain(user_input, system_injection=None):
         if meta_review and goal_stack:
             goal_stack.ingest_goal_candidates(meta_review.get("goal_candidates", []), source="meta_review")
             _sync_identity_goal_consistency()
-            add_memory_document(
+            memory_system.add_memory(
                 f"[Meta Review] confidence={meta_review.get('confidence', 0.5):.2f} | risks={meta_review.get('risk_flags', [])} | missing={meta_review.get('missing_information', [])}"
             )
             if passive_cognition_engine:
@@ -3506,7 +3537,7 @@ def erisia_complete_brain(user_input, system_injection=None):
         if len(chat_history) > MAX_HISTORY:
             chat_history = chat_history[-MAX_HISTORY:]
             
-        add_memory_document(f"Master Sameer: {user_input} | Erisia: {erisia_reply}")
+        memory_system.add_memory(f"Master Sameer: {user_input} | Erisia: {erisia_reply}")
         if passive_cognition_engine:
             passive_cognition_engine.publish_event(
                 "conversation_turn",
@@ -3717,7 +3748,7 @@ def erisia_complete_brain(user_input, system_injection=None):
     if meta_review and goal_stack:
         goal_stack.ingest_goal_candidates(meta_review.get("goal_candidates", []), source="meta_review")
         _sync_identity_goal_consistency()
-        add_memory_document(
+        memory_system.add_memory(
             f"[Meta Review] confidence={meta_review.get('confidence', 0.5):.2f} | risks={meta_review.get('risk_flags', [])} | missing={meta_review.get('missing_information', [])}"
         )
         if passive_cognition_engine:
@@ -3734,7 +3765,7 @@ def erisia_complete_brain(user_input, system_injection=None):
     if len(chat_history) > MAX_HISTORY:
         chat_history = chat_history[-MAX_HISTORY:]
         
-    add_memory_document(f"Master Sameer: {user_input} | Erisia: {erisia_reply}")
+    memory_system.add_memory(f"Master Sameer: {user_input} | Erisia: {erisia_reply}")
     if passive_cognition_engine:
         passive_cognition_engine.publish_event(
             "conversation_turn",

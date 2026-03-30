@@ -1,17 +1,45 @@
+from typing import Any
 import pandas as pd
 
 from backtester import ExecutionSimulator, MarketRegime, PositionDirection, PositionManager, SignalAction
 
+
+from src.oracle.position_manager import PositionState # make sure this exists
 
 class RecordingPositionManager(PositionManager):
     def __init__(self) -> None:
         super().__init__()
         self.open_long_calls = 0
 
-    def open_long(self, **kwargs: object):  # type: ignore[override]
-        self.open_long_calls += 1
-        return super().open_long(**kwargs)
+    def open_long(
+    self,
+    *,
+    ticker: str,
+    entry_index: int,
+    entry_date: str,
+    entry_price: float,
+    shares: float,
+    entry_cost: float,
+    signal: str,
+    confidence: int,
+    reasoning: str,
+    regime: str,
+) -> PositionState:
 
+        self.open_long_calls += 1
+
+        return super().open_long(
+            ticker=ticker,
+            entry_index=entry_index,
+            entry_date=entry_date,
+            entry_price=entry_price,
+            shares=shares,
+            entry_cost=entry_cost,
+            signal=signal,
+            confidence=confidence,
+            reasoning=reasoning,
+            regime=regime,
+        )
 
 def test_position_manager_tracks_long_position_state() -> None:
     manager = PositionManager()

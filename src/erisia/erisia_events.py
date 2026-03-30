@@ -66,6 +66,7 @@ class EventType(Enum):
 
     # ── Daemon ───────────────────────────────────────────────────────
     DAEMON_MISSION_START = "daemon.mission.start"
+    MISSION_STARTED = "daemon.mission.started"
     DAEMON_MISSION_END = "daemon.mission.end"
     DAEMON_IDLE = "daemon.idle"
 

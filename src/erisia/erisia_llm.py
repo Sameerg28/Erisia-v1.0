@@ -105,7 +105,7 @@ class OllamaEngine(InferenceEngine):
         self._last_check = now
         if self._available:
             logger.info("Ollama is online at %s", self._base_url)
-        return self._available
+        return bool(self._available)
 
     def generate(self, **kwargs: Any) -> Any:
         client = self._get_client()

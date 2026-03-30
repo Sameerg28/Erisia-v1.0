@@ -37,10 +37,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from mcp.server import Server
 
 logger = logging.getLogger("erisia.mcp")
 
@@ -52,7 +54,7 @@ for _p in (_BASE_DIR, _SRC_DIR):
         sys.path.append(str(_p))
 
 
-def create_mcp_server():
+def create_mcp_server() -> Server[Any, Any] | None:
     """
     Create and configure the MCP server.
     Returns None if the mcp package is not installed.
@@ -63,8 +65,9 @@ def create_mcp_server():
             Tool,
             TextContent,
             Resource,
-            ResourceTemplate,
         )
+        from pydantic import TypeAdapter
+        from pydantic.networks import AnyUrl
     except ImportError:
         logger.warning(
             "MCP package not installed. Run: pip install mcp"
@@ -72,6 +75,10 @@ def create_mcp_server():
         return None
 
     server = Server("erisia")
+    resource_uri_adapter = TypeAdapter(AnyUrl)
+
+    def make_resource_uri(uri: str) -> AnyUrl:
+        return cast(AnyUrl, resource_uri_adapter.validate_python(uri))
 
     # ── Tool Definitions ─────────────────────────────────────────────
 
@@ -178,7 +185,7 @@ def create_mcp_server():
     # ── Tool Handlers ────────────────────────────────────────────────
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         try:
             if name == "erisia_ask":
                 from erisia.erisia_llm import query_llm
@@ -194,7 +201,11 @@ def create_mcp_server():
                 query = arguments.get("query", "")
                 n = arguments.get("n_results", 5)
                 results = query_memory_documents(query, n_results=n)
-                docs = results.get("documents", [[]])[0] if results else []
+                docs: Any = []
+                if isinstance(results, dict):
+                    documents = results.get("documents")
+                    if isinstance(documents, list) and documents:
+                        docs = documents[0]
                 return [TextContent(
                     type="text",
                     text=json.dumps(docs, indent=2),
@@ -258,19 +269,19 @@ def create_mcp_server():
     async def list_resources() -> list[Resource]:
         return [
             Resource(
-                uri="erisia://consciousness",
+                uri=make_resource_uri("erisia://consciousness"),
                 name="Erisia Consciousness",
                 description="Erisia's permanent consciousness and identity file",
                 mimeType="text/markdown",
             ),
             Resource(
-                uri="erisia://goals",
+                uri=make_resource_uri("erisia://goals"),
                 name="Goal Stack",
                 description="Current active goals with priorities",
                 mimeType="application/json",
             ),
             Resource(
-                uri="erisia://skills",
+                uri=make_resource_uri("erisia://skills"),
                 name="Skill Registry",
                 description="All registered skills and their metadata",
                 mimeType="application/json",
@@ -278,33 +289,40 @@ def create_mcp_server():
         ]
 
     @server.read_resource()
-    async def read_resource(uri: str) -> str:
+    async def read_resource(uri: AnyUrl) -> str:
+        uri_text = str(uri)
         try:
             from erisia.erisia_config import get_config
             cfg = get_config()
 
-            if uri == "erisia://consciousness":
+            if uri_text == "erisia://consciousness":
                 path = cfg.paths.consciousness_file
-                if path.exists():
-                    return path.read_text(encoding="utf-8")
-                return "Consciousness file not found."
+                return (
+                    path.read_text(encoding="utf-8")
+                    if path.exists()
+                    else "Consciousness file not found."
+                )
 
-            elif uri == "erisia://goals":
+            if uri_text == "erisia://goals":
                 path = cfg.paths.goal_stack_file
-                if path.exists():
-                    return path.read_text(encoding="utf-8")
-                return "[]"
+                return (
+                    path.read_text(encoding="utf-8")
+                    if path.exists()
+                    else "[]"
+                )
 
-            elif uri == "erisia://skills":
+            if uri_text == "erisia://skills":
                 reg_file = cfg.paths.skills_dir / "_registry.json"
-                if reg_file.exists():
-                    return reg_file.read_text(encoding="utf-8")
-                return "{}"
+                return (
+                    reg_file.read_text(encoding="utf-8")
+                    if reg_file.exists()
+                    else "{}"
+                )
 
-            return f"Unknown resource: {uri}"
+            return f"Unknown resource: {uri_text}"
 
         except Exception as exc:
-            return f"Error reading {uri}: {exc}"
+            return f"Error reading {uri_text}: {exc}"
 
     return server
 
@@ -329,15 +347,21 @@ if __name__ == "__main__":
     if server is None:
         print("MCP package not installed. Run: pip install mcp")
         sys.exit(1)
+    mcp_server = server
 
     import asyncio
 
     if args.transport == "stdio":
         from mcp.server.stdio import stdio_server
 
-        async def main():
+        async def main() -> None:
+            initialization_options = mcp_server.create_initialization_options()
             async with stdio_server() as (read_stream, write_stream):
-                await server.run(read_stream, write_stream)
+                await mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    initialization_options=initialization_options,
+                )
 
         asyncio.run(main())
     else:
