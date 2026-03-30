@@ -1,11 +1,6 @@
-config/.env
-
-# --- ERISIA SECURITY EXCLUSIONS ---
-config/.env
-*.db
-*.log
 __pycache__/
 *.pyc
-reports/
-data/
-.DS_Store
+*.pyo
+*.pyd
+.env
+.venv/

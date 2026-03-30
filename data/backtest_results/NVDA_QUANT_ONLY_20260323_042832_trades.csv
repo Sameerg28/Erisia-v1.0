@@ -1,0 +1,2 @@
+ticker,entry_date,exit_date,entry_price,exit_price,shares,pnl,pnl_pct,signal,confidence,reasoning,regime,hold_bars,exit_reason,direction
+SUMMARY,,,0.0,0.0,0.0,0.0,0.0,ALL,0,avg_pnl_per_trade=0.00; sharpe=0.0000; profit_factor=0.0000; avg_hold_bars=0.00,ALL,0.0,SUMMARY,ALL

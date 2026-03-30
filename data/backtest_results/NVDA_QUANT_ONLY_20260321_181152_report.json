@@ -1,0 +1,82 @@
+{
+  "ticker": "NVDA",
+  "mode": "QUANT_ONLY",
+  "total_trades": 74,
+  "win_rate": 0.40540540540540543,
+  "avg_pnl_per_trade": 104.60800801929021,
+  "total_pnl": 7740.992593427538,
+  "sharpe_ratio": -0.35018873818325935,
+  "max_drawdown": -0.027540717492677752,
+  "max_drawdown_duration": 169,
+  "profit_factor": 1.4168122158052672,
+  "avg_hold_bars": 4.743243243243243,
+  "regime_breakdown": {
+    "VOLATILE": {
+      "trades": 41,
+      "win_rate": 0.36585365853658536,
+      "avg_pnl": -3.5934157913025047
+    },
+    "BEAR": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -584.139213054581
+    },
+    "SIDEWAYS": {
+      "trades": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -432.77900550351114
+    },
+    "BULL": {
+      "trades": 31,
+      "win_rate": 0.4838709677419355,
+      "avg_pnl": 287.2658341751281
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    }
+  },
+  "exit_reason_breakdown": {
+    "SIGNAL": 4,
+    "STOP_LOSS": 37,
+    "TAKE_PROFIT": 30,
+    "MAX_HOLD": 3
+  },
+  "best_trade": {
+    "ticker": "NVDA",
+    "entry_date": "2023-05-09",
+    "exit_date": "2023-05-26",
+    "entry_price": 28.9134496679306,
+    "exit_price": 37.87105438995361,
+    "shares": 541.3428775227317,
+    "pnl": 4812.982200330525,
+    "pnl_pct": 0.30719054217653124,
+    "signal": "BUY",
+    "confidence": 76,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 13,
+    "exit_reason": "TAKE_PROFIT",
+    "direction": "LONG"
+  },
+  "worst_trade": {
+    "ticker": "NVDA",
+    "entry_date": "2024-06-20",
+    "exit_date": "2024-06-21",
+    "entry_price": 139.86990305328368,
+    "exit_price": 127.05644274520874,
+    "shares": 107.08161609117646,
+    "pnl": -1400.6689419942231,
+    "pnl_pct": -0.0934248115519239,
+    "signal": "BUY",
+    "confidence": 68,
+    "reasoning": "",
+    "regime": "BULL",
+    "hold_bars": 1,
+    "exit_reason": "STOP_LOSS",
+    "direction": "LONG"
+  },
+  "erisia_memory_note": "Oracle's QUANT_ONLY strategy on NVDA achieved a 40.54% win rate with a Sharpe of -0.35. She performed best in BULL regimes and worst in BEAR regimes. Max drawdown of 2.75% suggests contained downside pressure during the tested window.",
+  "generated_at": "2026-03-21T18:11:52Z"
+}

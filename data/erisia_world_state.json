@@ -1,0 +1,20 @@
+{
+  "tracker_mode": "win32_lightweight",
+  "captured_at_utc": "2026-03-30T14:54:02.433854+00:00",
+  "active_window": {
+    "hwnd": 132012,
+    "title": "erisia_core.py - Erisia v0.1 - Visual Studio Code [Administrator]",
+    "pid": 8628
+  },
+  "cursor": {
+    "x": 1760,
+    "y": 378
+  },
+  "last_window_change_utc": "2026-03-30T14:53:39.858322+00:00",
+  "staleness_ms": 0,
+  "heavy_dump": {
+    "enabled": false,
+    "reason": "disabled_by_config"
+  },
+  "errors": []
+}

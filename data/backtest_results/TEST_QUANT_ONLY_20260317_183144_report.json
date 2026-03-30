@@ -1,0 +1,80 @@
+{
+  "ticker": "TEST",
+  "mode": "QUANT_ONLY",
+  "total_trades": 1,
+  "win_rate": 1.0,
+  "avg_pnl_per_trade": 1345.9422776899974,
+  "total_pnl": 1345.9422776900028,
+  "sharpe_ratio": 10.141070110960667,
+  "max_drawdown": -0.0002569674420619504,
+  "max_drawdown_duration": 4,
+  "profit_factor": "Infinity",
+  "avg_hold_bars": 4.0,
+  "regime_breakdown": {
+    "BULL": {
+      "trades": 1,
+      "win_rate": 1.0,
+      "avg_pnl": 1345.9422776899974
+    },
+    "BEAR": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "SIDEWAYS": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "VOLATILE": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    },
+    "UNKNOWN": {
+      "trades": 0,
+      "win_rate": 0.0,
+      "avg_pnl": 0.0
+    }
+  },
+  "exit_reason_breakdown": {
+    "SIGNAL": 1,
+    "STOP_LOSS": 0,
+    "TAKE_PROFIT": 0,
+    "MAX_HOLD": 0
+  },
+  "best_trade": {
+    "ticker": "TEST",
+    "entry_date": "2024-01-03",
+    "exit_date": "2024-01-09",
+    "entry_price": 103.05149999999999,
+    "exit_price": 111.944,
+    "shares": 155.10706767020363,
+    "pnl": 1345.9422776899974,
+    "pnl_pct": 0.08412139235562481,
+    "signal": "BUY",
+    "confidence": 80,
+    "reasoning": "test-buy",
+    "regime": "BULL",
+    "hold_bars": 4,
+    "exit_reason": "SIGNAL"
+  },
+  "worst_trade": {
+    "ticker": "TEST",
+    "entry_date": "2024-01-03",
+    "exit_date": "2024-01-09",
+    "entry_price": 103.05149999999999,
+    "exit_price": 111.944,
+    "shares": 155.10706767020363,
+    "pnl": 1345.9422776899974,
+    "pnl_pct": 0.08412139235562481,
+    "signal": "BUY",
+    "confidence": 80,
+    "reasoning": "test-buy",
+    "regime": "BULL",
+    "hold_bars": 4,
+    "exit_reason": "SIGNAL"
+  },
+  "erisia_memory_note": "Oracle's QUANT_ONLY strategy on TEST achieved a 100.00% win rate with a Sharpe of 10.14. She performed best in BULL regimes and worst in BULL regimes. Max drawdown of 0.03% suggests contained downside pressure during the tested window.",
+  "generated_at": "2026-03-17T18:31:44Z"
+}
