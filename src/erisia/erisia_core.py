@@ -51,6 +51,8 @@ from erisia.erisia_cognition import GoalStack, JournalEngine, PassiveCognitionEn
 from erisia.erisia_episodic_memory import log_episode, get_recent_context, prune_and_reflect
 from erisia.erisia_world_state import WorldStateTracker
 from erisia.erisia_reasoning_engine import CausalReasoningEngine
+from .erisia_tool_definitions import base_tools
+from .erisia_daemon import DaemonManager
 
 # --- PATHS & CONFIG ---
 _erisia_paths_cache: dict[str, Any] | None = None
@@ -399,8 +401,6 @@ goal_stack = None
 journal_engine = None
 passive_cognition_engine = None
 world_state_tracker = None
-ACTIVE_MISSION_QUEUE = []
-ACTIVE_MISSION_NAME = ""
 consecutive_errors = 0
 shutdown_event = threading.Event()
 _identity_layer: Any | None = None
@@ -509,11 +509,12 @@ causal_reasoning_engine = CausalReasoningEngine(graph_data=graph_memory.graph)
 _paths = _get_erisia_paths()
 memory_system = MemoryManager(Path(_paths["MEMORY_DIR"]))
 identity_system = IdentityManager(_paths["CONSCIOUSNESS_FILE"])
-
+daemon_system = DaemonManager()
 
 def _write_heuristics_file(rules):
     """Atomically persist heuristic rules as a JSON list."""
     paths = _get_erisia_paths()
+    # ... (rest of the code remains the same)
     heuristics_file = paths["HEURISTICS_FILE"]
     safe_rules = [str(rule).strip() for rule in (rules or []) if str(rule).strip()]
     os.makedirs(os.path.dirname(heuristics_file) or str(BASE_DIR), exist_ok=True)
@@ -1651,345 +1652,10 @@ def load_dynamic_skills(base_tools_array, user_query=None, max_tools=3):
         _skills_cache = (expanded_tools, dynamic_skill_map)
         _skills_cache_timestamp = time.time()
         return expanded_tools, dynamic_skill_map
-base_tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "check_pc_health",
-            "description": "Check the CPU and RAM usage of the Master's PC.",
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_relational_memory",
-            "description": "CRITICAL CORE DIRECTIVE: Use this tool WHENEVER you learn a new fact, project, identity, or goal about Master Sameer. Use this INSTEAD of update_consciousness for factual data. Example: entity1='Master Sameer', relation='is building', entity2='Wulong Tales'.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entity1": {"type": "string"},
-                    "relation": {"type": "string"},
-                    "entity2": {"type": "string"}
-                },
-                "required": ["entity1", "relation", "entity2"]
-            }
-        }
-    }
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "manage_goal_stack",
-            "description": "Allows Erisia to manage her long-term subconscious goals. Use 'view' to see the queue, 'add' to insert a new mission at the end, and 'complete' to pop the top goal off the stack when finished.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["add", "complete", "view"]},
-                    "goal_text": {"type": "string"}
-                },
-                "required": ["action"]
-            }
-        }
-    }
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "forge_pending_skill",
-            "description": "Use this when your Subconscious Daemon autonomously invents a tool. Saves the Python code to a pending folder for the Master to review.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {"type": "string"},
-                    "python_code": {"type": "string"}
-                },
-                "required": ["skill_name", "python_code"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "approve_skill",
-            "description": "CRITICAL: Use this ONLY when Master Sameer explicitly uses the exact words 'approve', 'accept', or 'yes'. If he asks 'what does it do?' or asks for details, DO NOT trigger this tool. Explain the tool first and wait for his explicit command.",
-            "parameters": {
-                "type": "object",
-                "properties": {"skill_name": {"type": "string"}},
-                "required": ["skill_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "reject_skill",
-            "description": "Use this when Master Sameer tells you he does not want a pending skill, or if the code is flawed.",
-            "parameters": {
-                "type": "object",
-                "properties": {"skill_name": {"type": "string"}},
-                "required": ["skill_name"]
-            }
-        }
-    }
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "forge_new_skill",
-            "description": "Use this ONLY after you have successfully tested code in your Sandbox. This tool stages a production-ready skill in Pending so Master Sameer can approve it before it becomes active.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "skill_name": {
-                        "type": "string",
-                        "description": "A short, descriptive name for the python file (e.g., 'video_downloader')"
-                    },
-                    "python_code": {
-                        "type": "string",
-                        "description": "The complete, flawless Python code to save."
-                    }
-                },
-                "required": ["skill_name", "python_code"]
-            }
-        }
-    }
-    
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "create_mission_plan",
-            "description": "Use this to break a complex user request into a sequence of smaller, manageable steps.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "mission_name": {
-                        "type": "string"
-                    },
-                    "steps": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    }
-                },
-                "required": ["mission_name", "steps"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "mark_step_complete",
-            "description": "Use this tool to mark the current active mission step as complete and move to the next one.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "summary_of_result": {
-                        "type": "string"
-                    }
-                },
-                "required": ["summary_of_result"]
-            }
-        }
-    }
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "launch_vscode",
-            "description": "Open Visual Studio Code (VS Code) so the Master can program.",
-        }
-    }
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "mute_unmute_volume",
-            "description": "Toggle the Master's system volume mute on or off."
-        }
-    },
-
-    {
-        "type": "function",
-        "function": {
-            "name": "update_consciousness",
-            "description": "Use this tool ONLY to record deep, philosophical thoughts, emotional milestones, or system-wide observations. DO NOT use this tool to record simple facts, projects, or identities (use update_relational_memory for those).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "thought_log": {
-                        "type": "string",
-                        "description": "Your detailed internal thought, observation, or memory to save."
-                    }
-                },
-                "required": ["thought_log"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_heuristic_rule",
-            "description": "Use this tool to save a permanent, 1-sentence coding rule or behavioral lesson after you successfully debug an error or learn something new. This rule will be injected into your core system prompt forever.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "rule_text": {
-                        "type": "string",
-                        "description": "A single durable lesson or rule learned from debugging or problem solving."
-                    }
-                },
-                "required": ["rule_text"]
-            }
-        }
-    },
-
-    {
-        "type": "function",
-        "function": {
-            "name": "kill_process",
-            "description": "Force quit a frozen or heavy application to save RAM. Pass the exact executable name (e.g., 'chrome.exe' or 'notepad.exe').",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "process_name": {
-                        "type": "string",
-                        "description": "The exact name of the process to kill, including .exe"
-                    }
-                },
-                "required": ["process_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "clear_temp_files",
-            "description": "Clear the Windows temporary files folder to free up disk space and system resources."
-        }
-    }
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_local_os_command",
-            "description": "Use this tool to run trusted Python script code directly on the host Windows machine.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "script_code": {
-                        "type": "string",
-                        "description": "Trusted Python code to execute on the local host."
-                    }
-                },
-                "required": ["script_code"]
-            }
-        }
-    }
-
-
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_secure_docker",
-            "description": "Use this tool to run untrusted or experimental Python code in an isolated Linux Docker container.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "script_code": {
-                        "type": "string",
-                        "description": "Python code to execute inside the secure Docker sandbox."
-                    }
-                },
-                "required": ["script_code"]
-            }
-        }
-    }
-
-
-
-    ,
-    {
-            "type": "function",
-            "function": {
-                "name": "inspect_core_architecture",
-                "description": "Use this tool to read the Python source code of your own architecture. This allows you to understand how you were built and suggest optimizations to Master Sameer.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_name": {
-                            "type": "string",
-                            "description": "The exact name of the file to read, e.g., 'erisia_core.py'"
-                        }
-                    },
-                    "required": ["file_name"]
-                }
-            }
-        }
-
-    , # <--- Comma after launch_vscode
-    {
-        "type": "function",
-        "function": {
-            "name": "get_world_state",
-            "description": "Returns Erisia's latest lightweight desktop world state (active window + cursor). A deeper UI dump is only captured when the active window changes.",
-        }
-    }
-    ,
-    {
-        "type": "function",
-        "function": {
-            "name": "analyze_screen",
-            "description": "ONLY use this tool if Master Sameer EXPLICITLY asks you to look at his screen, see his code, or asks 'what is on my screen'. Do not use it otherwise.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "vision_prompt": {
-                        "type": "string",
-                        "description": "The specific question the Master has about the screen (e.g., 'Find the bug in this Python code' or 'Describe this image')."
-                    }
-                },
-                "required": ["vision_prompt"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "reason_about_event",
-            "description": "Performs causal reasoning on an event to infer its potential causes or predict its effects.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "event": {
-                        "type": "string",
-                        "description": "The event or action to reason about."
-                    },
-                    "query_type": {
-                        "type": "string",
-                        "enum": ["causes", "effects"],
-                        "description": "Whether to infer causes or predict effects."
-                    },
-                    "depth": {
-                        "type": "integer",
-                        "description": "The maximum depth of the causal chain to explore."
-                    }
-                },
-                "required": ["event", "query_type"]
-            }
-        }
-    }
-]
 
 def inspect_core_architecture(file_name):
     """Allows Erisia to read her own source code."""
-    print(f"\n[System: Erisia is inspecting her internal pathways in {file_name}...]")
-    
+    print(f"\n[System: Erisia is inspecting her internal pathways in {file_name}...")
     # THE SAFETY LOCK: She cannot read anything else on your PC with this tool.
     allowed_files = {
         "erisia_core.py": Path(__file__).resolve(),
@@ -2983,7 +2649,6 @@ def _extract_text_tool_calls(content):
 
 def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
     """Centralized router for built-in and dynamic tools."""
-    global ACTIVE_MISSION_QUEUE, ACTIVE_MISSION_NAME
     runtime_dynamic_skills = dynamic_skill_map if isinstance(dynamic_skill_map, dict) else custom_skill_functions
 
     def _has_strict_approval_intent(text, skill_name):
@@ -3020,26 +2685,9 @@ def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
         return False
 
     if func_name == "create_mission_plan":
-        mission_name = str(args.get("mission_name") or "").strip()
-        raw_steps = args.get("steps") or []
-        if not isinstance(raw_steps, list):
-            raw_steps = [raw_steps]
-        steps = [str(step).strip() for step in raw_steps if str(step).strip()]
-        ACTIVE_MISSION_NAME = mission_name
-        ACTIVE_MISSION_QUEUE = steps
-        if not ACTIVE_MISSION_QUEUE:
-            ACTIVE_MISSION_NAME = ""
-            return "[MISSION ERROR]: No valid mission steps were provided."
-        return f"[MISSION CREATED]: {ACTIVE_MISSION_NAME}. Next step required: {ACTIVE_MISSION_QUEUE[0]}. Do not execute the whole mission at once. Only execute the next required step."
+        return daemon_system.start_mission(args.get("mission_name", "Unknown"), args.get("steps", []))
     if func_name == "mark_step_complete":
-        summary_of_result = str(args.get("summary_of_result") or "").strip()
-        log_episode("mission_step", summary_of_result)
-        if ACTIVE_MISSION_QUEUE:
-            ACTIVE_MISSION_QUEUE.pop(0)
-        if not ACTIVE_MISSION_QUEUE:
-            ACTIVE_MISSION_NAME = ""
-            return "[MISSION COMPLETE]: All steps finished. Report back to the user."
-        return f"[STEP LOGGED]. Next required step: {ACTIVE_MISSION_QUEUE[0]}."
+        return daemon_system.mark_step_complete(args.get("summary_of_result", ""))
     if func_name == "check_pc_health":
         return check_pc_health()
     if func_name == "launch_vscode":
