@@ -80,11 +80,30 @@ def create_mcp_server() -> Server[Any, Any] | None:
     def make_resource_uri(uri: str) -> AnyUrl:
         return cast(AnyUrl, resource_uri_adapter.validate_python(uri))
 
+    # ── MCP Bridge (external tools) ────────────────────────────────────
+
+    _bridge_tools: list[Tool] = []
+    _bridge = None
+    try:
+        from erisia.erisia_mcp_bridge import get_bridge
+        _bridge = get_bridge()
+        for tool_def in _bridge.get_all_tools():
+            _bridge_tools.append(Tool(
+                name=tool_def["name"],
+                description=tool_def.get("description", ""),
+                inputSchema=tool_def.get("inputSchema", {
+                    "type": "object",
+                    "properties": {},
+                }),
+            ))
+    except Exception as exc:
+        logger.warning(f"MCP bridge unavailable: {exc}")
+
     # ── Tool Definitions ─────────────────────────────────────────────
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
-        return [
+        native_tools = [
             Tool(
                 name="erisia_ask",
                 description=(
@@ -181,6 +200,7 @@ def create_mcp_server() -> Server[Any, Any] | None:
                 },
             ),
         ]
+        return native_tools + _bridge_tools
 
     # ── Tool Handlers ────────────────────────────────────────────────
 
@@ -252,6 +272,20 @@ def create_mcp_server() -> Server[Any, Any] | None:
                 return [TextContent(type="text", text=result)]
 
             else:
+                if _bridge is not None:
+                    import asyncio
+                    try:
+                        loop = asyncio.new_event_loop()
+                        result = loop.run_until_complete(
+                            _bridge.call_tool(name, arguments)
+                        )
+                        loop.close()
+                        return [TextContent(type="text", text=result)]
+                    except Exception as exc:
+                        return [TextContent(
+                            type="text",
+                            text=f"Bridge tool error: {exc}",
+                        )]
                 return [TextContent(
                     type="text",
                     text=f"Unknown tool: {name}",

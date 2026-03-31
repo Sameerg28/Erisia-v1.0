@@ -21,3 +21,10 @@ python-telegram-bot    # Telegram channel (Phase 5)
 fastapi                # REST API server (Phase 5)
 uvicorn                # ASGI server for FastAPI (Phase 5)
 mcp                    # Model Context Protocol server (Phase 6)
+mcp-server-fetch       # Web content fetching (Phase 6 bridge)
+mcp-server-time        # Time/timezone utilities (Phase 6 bridge)
+# Voice/TTS/STT support
+edge-tts               # Text-to-Speech using Edge Neural voices
+pygame                 # Audio playback for TTS
+faster-whisper         # Local speech-to-text (CPU-optimized)
+SpeechRecognition      # Speech recognition (for microphone input)
