@@ -683,6 +683,15 @@
         },
         {
             "id": "Erisia_master"
+        },
+        {
+            "id": "mirofish"
+        },
+        {
+            "id": "local OS"
+        },
+        {
+            "id": "Reject check_weather.py"
         }
     ],
     "edges": [
@@ -692,7 +701,7 @@
             "target": "hey"
         },
         {
-            "relation": "interacts with",
+            "relation": "User",
             "source": "Master Sameer",
             "target": "Erisia"
         },
@@ -877,7 +886,7 @@
             "target": "Sandbox Setup Validation"
         },
         {
-            "relation": "builder",
+            "relation": "operates_on",
             "source": "Erisia",
             "target": "check_weather_mumbai.py"
         },
@@ -935,6 +944,21 @@
             "relation": "operating_mode",
             "source": "Erisia",
             "target": "win32_lightweight"
+        },
+        {
+            "relation": "operates_on",
+            "source": "Erisia",
+            "target": "check_weather.py"
+        },
+        {
+            "relation": "has_goal",
+            "source": "Erisia",
+            "target": "Reject check_weather.py"
+        },
+        {
+            "relation": "associated_with",
+            "source": "Erisia",
+            "target": "The Crucible"
         },
         {
             "relation": "recall",
@@ -1482,6 +1506,11 @@
             "target": "lib"
         },
         {
+            "relation": "approves_or_rejects",
+            "source": "check_weather.py",
+            "target": "check_weather.py"
+        },
+        {
             "relation": "has_direct_child_goal",
             "source": "Investigate discrepancies in sandbox",
             "target": "Investigate discrepancies"
@@ -1685,6 +1714,11 @@
             "relation": "commander",
             "source": "Erisia_master",
             "target": "Erisia"
+        },
+        {
+            "relation": "script",
+            "source": "mirofish",
+            "target": "local OS"
         }
     ]
 }

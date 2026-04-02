@@ -1,13 +1,4 @@
 {
-  "system_restart_validator": {
-    "name": "system_restart_validator",
-    "description": "Improved v2: autonomous re-forge routed to improvement",
-    "location": "pending",
-    "version": 2,
-    "forge_count": 2,
-    "last_updated": "2026-03-18T17:47:03Z",
-    "first_forged": "2026-03-18T17:43:55Z"
-  },
   "check_weather_mumbai": {
     "name": "check_weather_mumbai",
     "description": "Improved v2: merged with similar skill 'check_weather'",
@@ -17,49 +8,40 @@
     "last_updated": "2026-03-18T17:45:31Z",
     "first_forged": "2026-03-18T17:44:01Z"
   },
-  "autonomous_skill": {
-    "name": "autonomous_skill",
-    "description": "Improved v7: autonomous re-forge routed to improvement",
-    "location": "pending",
-    "version": 7,
-    "forge_count": 7,
-    "last_updated": "2026-03-27T18:40:43Z",
-    "first_forged": "2026-03-22T07:42:08Z"
-  },
-  "curl_or_wget": {
-    "name": "curl_or_wget",
-    "description": "Tool needed for plan step: Fetch the latest AI news from a reliable online source",
-    "location": "pending",
+  "battery_monitor": {
+    "name": "battery_monitor",
+    "description": "Fetch the exact battery percentage of the laptop using the psutil library.",
+    "location": "active",
     "version": 1,
     "forge_count": 1,
-    "last_updated": "2026-03-22T09:10:11Z",
-    "first_forged": "2026-03-22T09:10:11Z"
+    "last_updated": "2026-03-06T13:32:00Z",
+    "first_forged": "2026-03-06T13:32:00Z"
   },
-  "html_parser_or_json_parser": {
-    "name": "html_parser_or_json_parser",
-    "description": "Tool needed for plan step: Parse the HTML or JSON response to extract relevant news articles",
-    "location": "pending",
+  "youtube_search": {
+    "name": "youtube_search",
+    "description": "Search YouTube for videos",
+    "location": "active",
     "version": 1,
     "forge_count": 1,
-    "last_updated": "2026-03-22T09:10:11Z",
-    "first_forged": "2026-03-22T09:10:11Z"
+    "last_updated": "2026-03-18T17:40:00Z",
+    "first_forged": "2026-03-18T17:40:00Z"
   },
-  "text_summarization_tool": {
-    "name": "text_summarization_tool",
-    "description": "Tool needed for plan step: Summarize the top 3 news articles",
-    "location": "pending",
+  "hacker_news_headlines": {
+    "name": "hacker_news_headlines",
+    "description": "Fetch the latest headlines from Hacker News",
+    "location": "active",
     "version": 1,
     "forge_count": 1,
-    "last_updated": "2026-03-22T09:10:11Z",
-    "first_forged": "2026-03-22T09:10:11Z"
+    "last_updated": "2026-03-08T08:50:00Z",
+    "first_forged": "2026-03-08T08:50:00Z"
   },
-  "touch_command": {
-    "name": "touch_command",
-    "description": "Tool needed for plan step: Create a file to store the summarized news",
+  "execute_skill": {
+    "name": "execute_skill",
+    "description": "Improved v8: autonomous re-forge routed to improvement",
     "location": "pending",
-    "version": 1,
-    "forge_count": 1,
-    "last_updated": "2026-03-22T09:10:11Z",
-    "first_forged": "2026-03-22T09:10:11Z"
+    "version": 8,
+    "forge_count": 8,
+    "last_updated": "2026-03-31T14:08:00Z",
+    "first_forged": "2026-03-31T06:11:02Z"
   }
 }

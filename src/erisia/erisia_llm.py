@@ -111,7 +111,7 @@ class OllamaEngine(InferenceEngine):
         client = self._get_client()
         # Default model if none specified or if cloud model name is used
         model = kwargs.get("model", self._default_model)
-        if "/" in model or model.startswith("llama-3"):
+        if "/" in model or model.startswith("llama-3") or model.startswith("gemini") or model.startswith("meta-llama"):
             # Cloud model name passed — use our local default instead
             model = self._default_model
         kwargs["model"] = model

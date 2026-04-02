@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
+from typing import Any
 from urllib import error, request
 
 
-MIROFISH_TOOL_SCHEMA = {
+logger = logging.getLogger("erisia_mirofish")
+
+
+TOOL_SCHEMA = {
     "type": "function",
     "function": {
         "name": "mirofish_call",
@@ -50,134 +55,114 @@ MIROFISH_TOOL_SCHEMA = {
                     ),
                 },
             },
-            "required": ["endpoint"],
-        },
-    },
+            "required": ["endpoint"]
+        }
+    }
 }
 
-_MIROFISH_PROCESS: subprocess.Popen | None = None
+
+MIROFISH_BASE_URL = os.environ.get("ERISIA_MIROFISH_BASE_URL", "http://localhost:8080").rstrip("/")
+MIROFISH_BACKEND_DIR = os.environ.get("ERISIA_MIROFISH_BACKEND_DIR", "")
 
 
-def _health_check(base_url: str, timeout_value: float) -> bool:
+def _health_check() -> bool:
+    """Ping MiroFish /health endpoint."""
     try:
-        req = request.Request(
-            url=base_url.rstrip("/") + "/health",
-            method="GET",
-            headers={"Accept": "application/json"},
-        )
-        with request.urlopen(req, timeout=timeout_value) as response:
-            return 200 <= int(getattr(response, "status", 200)) < 300
+        req = request.Request(f"{MIROFISH_BASE_URL}/health", method="GET")
+        with request.urlopen(req, timeout=5) as resp:
+            return resp.status == 200
     except Exception:
         return False
 
 
 def _try_autostart_mirofish() -> str:
-    global _MIROFISH_PROCESS
-    if _MIROFISH_PROCESS is not None and _MIROFISH_PROCESS.poll() is None:
-        return "[MIROFISH AUTOSTART]: Existing managed process is already running."
+    """Attempt to auto-start MiroFish from configured backend directory."""
+    if not MIROFISH_BACKEND_DIR or not os.path.isdir(MIROFISH_BACKEND_DIR):
+        return "[MIROFISH]: Cannot auto-start - ERISIA_MIROFISH_BACKEND_DIR not set or not a directory."
 
-    backend_dir = os.environ.get("ERISIA_MIROFISH_BACKEND_DIR", "").strip()
-    if not backend_dir:
-        return (
-            "[MIROFISH AUTOSTART ERROR]: ERISIA_MIROFISH_BACKEND_DIR is not set. "
-            "Set it to MiroFish/backend path."
-        )
-    run_py = os.path.join(backend_dir, "run.py")
-    if not os.path.exists(run_py):
-        return f"[MIROFISH AUTOSTART ERROR]: run.py not found at {run_py}"
+    startup_script = os.path.join(MIROFISH_BACKEND_DIR, "start.sh")
+    if not os.path.exists(startup_script):
+        startup_script = os.path.join(MIROFISH_BACKEND_DIR, "start.bat")
+    if not os.path.exists(startup_script):
+        return f"[MIROFISH]: Cannot auto-start - no start.sh or start.bat found in {MIROFISH_BACKEND_DIR}"
 
     try:
-        _MIROFISH_PROCESS = subprocess.Popen(
-            [sys.executable, run_py],
-            cwd=backend_dir,
+        subprocess.Popen(
+            [sys.executable, "-m", "mirofish"],
+            cwd=MIROFISH_BACKEND_DIR,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
-        return "[MIROFISH AUTOSTART]: Start command issued."
+        logger.info("MiroFish auto-start triggered.")
+        time.sleep(3)
+        return "[MIROFISH]: Auto-start initiated. Will retry health check..."
     except Exception as exc:
-        return f"[MIROFISH AUTOSTART ERROR]: {exc}"
+        return f"[MIROFISH]: Auto-start failed - {exc}"
 
 
 def call_mirofish(
     endpoint: str,
     method: str = "GET",
-    payload_json: str = "",
+    payload_json: str | None = None,
     timeout_seconds: float = 60.0,
-    auto_start: bool = False,
+    auto_start: bool = True,
 ) -> str:
     """
-    Erisia -> MiroFish bridge call.
+    Make an HTTP request to MiroFish API through Erisia's orchestrator.
 
-    MiroFish base URL is read from ERISIA_MIROFISH_BASE_URL and defaults
-    to http://127.0.0.1:5001.
+    Returns a standardized result string. On success: "[MIROFISH SUCCESS]: <body>".
+    On failure: "[MIROFISH ERROR]: <reason>".
     """
-    endpoint = str(endpoint or "").strip()
-    if not endpoint:
-        return "[MIROFISH ERROR]: Missing 'endpoint'."
     if not endpoint.startswith("/"):
-        endpoint = "/" + endpoint
+        return "[MIROFISH ERROR]: endpoint must start with '/'."
 
-    method = str(method or "GET").strip().upper()
-    if method not in {"GET", "POST"}:
-        return "[MIROFISH ERROR]: method must be GET or POST."
+    url = f"{MIROFISH_BASE_URL}{endpoint}"
 
-    base_url = os.environ.get("ERISIA_MIROFISH_BASE_URL", "http://127.0.0.1:5001").strip()
-    if not base_url:
-        base_url = "http://127.0.0.1:5001"
-    base_url = base_url.rstrip("/")
-    url = base_url + endpoint
-
-    try:
-        timeout_value = max(1.0, float(timeout_seconds))
-    except Exception:
-        timeout_value = 60.0
-
-    if auto_start and not _health_check(base_url, timeout_value=min(timeout_value, 5.0)):
-        auto_msg = _try_autostart_mirofish()
-        # Short warmup for first boot
-        for _ in range(12):
-            if _health_check(base_url, timeout_value=2.0):
-                break
-            time.sleep(0.5)
+    if not _health_check():
+        if auto_start:
+            auto_msg = _try_autostart_mirofish()
+            logger.info(auto_msg)
+            if not _health_check():
+                return "[MIROFISH ERROR]: MiroFish is not running. Set ERISIA_MIROFISH_BASE_URL or run MiroFish backend."
         else:
-            return (
-                f"{auto_msg}\n"
-                "[MIROFISH ERROR]: Auto-start attempted, but /health is still unreachable."
-            )
+            return "[MIROFISH ERROR]: MiroFish is not running. Set ERISIA_MIROFISH_BASE_URL or enable auto_start."
 
-    body = None
-    headers = {"Accept": "application/json"}
-    if method == "POST":
-        payload_obj = {}
-        if payload_json:
-            try:
-                payload_obj = json.loads(payload_json)
-            except Exception as exc:
-                return f"[MIROFISH ERROR]: Invalid payload_json. {exc}"
-            if not isinstance(payload_obj, dict):
-                return "[MIROFISH ERROR]: payload_json must decode to a JSON object."
-        body = json.dumps(payload_obj).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+    body: str | bytes | None = None
+    if payload_json:
+        try:
+            body = json.dumps(json.loads(payload_json)).encode("utf-8")
+        except json.JSONDecodeError as exc:
+            return f"[MIROFISH ERROR]: Invalid payload_json - not valid JSON: {exc}"
 
-    req = request.Request(url=url, method=method, headers=headers, data=body)
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
     try:
-        with request.urlopen(req, timeout=timeout_value) as response:
-            status = getattr(response, "status", 200)
-            response_text = response.read().decode("utf-8", errors="replace")
-        return (
-            f"[MIROFISH OK] {method} {endpoint} -> HTTP {status}\n"
-            f"{response_text[:4000]}"
-        )
+        req = request.Request(url, data=body, headers=headers, method=method.upper())
+        with request.urlopen(req, timeout=timeout_seconds) as resp:
+            raw = resp.read()
+            try:
+                data = json.loads(raw)
+                return f"[MIROFISH SUCCESS]: {json.dumps(data, ensure_ascii=False)}"
+            except json.JSONDecodeError:
+                return f"[MIROFISH SUCCESS]: {raw.decode('utf-8', errors='replace')}"
+
     except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        return (
-            f"[MIROFISH HTTP ERROR] {method} {endpoint} -> HTTP {exc.code}\n"
-            f"{detail[:4000]}"
-        )
+        try:
+            err_body = exc.fp.read().decode("utf-8", errors="replace")
+            return f"[MIROFISH ERROR] (HTTP {exc.code}): {err_body[:500]}"
+        except Exception:
+            return f"[MIROFISH ERROR] (HTTP {exc.code}): {exc.reason}"
+
+    except error.URLError as exc:
+        reason = str(exc.reason)
+        if "Connection refused" in reason:
+            return "[MIROFISH ERROR]: Connection refused. Is MiroFish running?"
+        return f"[MIROFISH ERROR]: {reason}"
+
     except Exception as exc:
-        return (
-            f"[MIROFISH CONNECTION ERROR] {method} {endpoint}\n"
-            f"Base URL: {base_url}\n"
-            f"{exc}"
-        )
+        return f"[MIROFISH ERROR]: {exc}"
+
+
+if __name__ == "__main__":
+    print(call_mirofish("/health"))

@@ -10,8 +10,8 @@ from pathlib import Path
 
 logger = logging.getLogger("erisia_execution")
 
-# These need to be imported from the parent module
-from . import BASE_DIR, SANDBOX_DIR
+BASE_DIR = Path(__file__).resolve().parents[1]
+SANDBOX_DIR = BASE_DIR / "sandbox"
 
 def inspect_core_architecture(file_name):
     """Allows Erisia to read her own source code."""
@@ -35,7 +35,7 @@ def inspect_core_architecture(file_name):
         return f"[SYSTEM ERROR]: Failed to read file. Error: {str(e)}"
     
 def execute_local_os_command(script_code):
-    """Runs trusted Python code directly on the host Windows machine."""
+    """Runs trusted Python code or shell commands directly on the host Windows machine."""
     if not script_code:
         return "[LOCAL OS ERROR]: script_code is required."
 
@@ -44,13 +44,68 @@ def execute_local_os_command(script_code):
     if threading.current_thread() is not threading.main_thread():
         return "[LOCAL OS ERROR]: Execution Blocked. The Subconscious Daemon is strictly forbidden from executing arbitrary local OS commands. You must use execute_secure_docker or a pre-approved parameterized skill."
 
-    print(f"\n[\u26a0\ufe0f OS FIREWALL]: Erisia is attempting to execute code on your host machine:\n{'-'*40}\n{script_code.strip()}\n{'-'*40}")
+    # Check if it looks like a shell command (no Python keywords/structures)
+    is_shell_cmd = _is_shell_command(script_code)
+    
+    print(f"\n[⚠️ OS FIREWALL]: Erisia is attempting to execute code on your host machine:\n{'-'*40}\n{script_code.strip()}\n{'-'*40}")
     auth = input("Allow this execution? (y/n): ").strip().lower()
     if auth != 'y':
         return "[LOCAL OS ERROR]: Execution Blocked. Master Sameer denied permission to run this script."
 
     print("\n[System: Erisia is executing trusted code directly on host Windows...]")
 
+    if is_shell_cmd:
+        return _execute_shell_command(script_code.strip())
+    
+    return _execute_python_script(script_code)
+
+
+def _is_shell_command(code: str) -> bool:
+    """Heuristically determine if input is a shell command vs Python code."""
+    code = code.strip().lower()
+    
+    # Python indicators
+    python_keywords = ['def ', 'class ', 'import ', 'from ', 'if ', 'for ', 'while ', 'return ', 'print(', 'print ', '=', 'print(']
+    # Shell-like patterns (no Python, starts with known commands)
+    shell_indicators = ['pip', 'npm', 'node ', 'python ', 'python.exe', 'git ', 'docker ', 'cmd ', 'powershell', 'ls', 'dir', 'cd ', 'mirofish', 'mcp', 'npx']
+    
+    has_python_keyword = any(code.startswith(kw) or kw in code for kw in python_keywords)
+    has_shell_indicator = any(code.startswith(sh) or code.split()[0] == sh for sh in shell_indicators if ' ' in sh or len(sh) > 2)
+    
+    # If no Python keywords and has shell-like patterns, treat as shell
+    return not has_python_keyword and has_shell_indicator
+
+
+def _execute_shell_command(cmd: str):
+    """Execute a shell command on Windows."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            shell=True,
+            encoding='utf-8',
+            errors='replace'
+        )
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+        if result.returncode == 0:
+            return f"[LOCAL OS SUCCESS]:\n{stdout}" if stdout else "[LOCAL OS SUCCESS]: Command completed with no output."
+        return f"[LOCAL OS ERROR]: Exit code {result.returncode}\n{stderr or stdout}"
+    except subprocess.TimeoutExpired:
+        return "[LOCAL OS ERROR]: Command exceeded 30 seconds and was terminated."
+    except Exception as e:
+        return f"[LOCAL OS ERROR]: {str(e)}"
+
+
+def _execute_python_script(script_code: str):
+    """Execute Python script directly on the host."""
+    import subprocess
+    import sys
+    import os
+    
     sandbox_dir = SANDBOX_DIR
     if not os.path.exists(sandbox_dir):
         os.makedirs(sandbox_dir)

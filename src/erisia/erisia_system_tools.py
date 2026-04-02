@@ -80,3 +80,35 @@ def clear_temp_files():
             
     mb_freed = freed_space / (1024 * 1024)
     return f"[SYSTEM ACTION]: Cleared {deleted_files} temporary files. Freed {mb_freed:.2f} MB of space."
+
+def speak_text(text: str) -> str:
+    """Convert text to speech and play it out loud."""
+    try:
+        from erisia.erisia_voice import speak_text as voice_speak
+        return voice_speak(text)
+    except ImportError:
+        return "[VOICE ERROR]: Voice module not available. Run: pip install edge-tts pygame faster-whisper"
+    except Exception as e:
+        return f"[VOICE ERROR]: {e}"
+
+def mirofish_call(
+    endpoint: str,
+    method: str = "GET",
+    payload_json: str | None = None,
+    timeout_seconds: float = 60.0,
+    auto_start: bool = True,
+) -> str:
+    """Call MiroFish through Erisia orchestrator."""
+    try:
+        from erisia.erisia_mirofish_bridge import call_mirofish
+        return call_mirofish(
+            endpoint=endpoint,
+            method=method,
+            payload_json=payload_json,
+            timeout_seconds=timeout_seconds,
+            auto_start=auto_start,
+        )
+    except ImportError:
+        return "[MIROFISH ERROR]: MiroFish module not available."
+    except Exception as e:
+        return f"[MIROFISH ERROR]: {e}"

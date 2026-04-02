@@ -16,18 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple, Set, Callable
 from datetime import UTC
 from erisia.erisia_llm import query_llm
 from erisia.erisia_memory_manager import tools_collection, memory_lock
-
-# Calculate the actual project root
-BASE_DIR = Path(__file__).resolve().parents[2]
-BASE_DIR_STR = str(BASE_DIR)
-
-# Paths
-SKILLS_DIR = os.path.join(BASE_DIR_STR, "skills")
-PENDING_SKILLS_DIR = os.path.join(BASE_DIR_STR, "skills", "pending")
-SANDBOX_DIR = os.path.join(BASE_DIR_STR, "skills", "sandbox")
-SKILLS_PATH = Path(SKILLS_DIR)
-PENDING_SKILLS_PATH = Path(PENDING_SKILLS_DIR)
-SANDBOX_PATH = Path(SANDBOX_DIR)
+from erisia.erisia_core import SKILLS_DIR, PENDING_SKILLS_DIR, SANDBOX_DIR, SKILLS_PATH, PENDING_SKILLS_PATH, SANDBOX_PATH
 
 # Constants & Cache
 _skills_cache: Any = None
@@ -37,7 +26,6 @@ TOOL_INDEX_BOOTSTRAPPED = False
 
 KNOWN_LOCAL_MODULES = {
     "erisia_core",
-    "erisia_body",
     "erisia_daemon",
     "erisia_cognition",
     "erisia_graph",

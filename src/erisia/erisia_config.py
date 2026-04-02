@@ -77,7 +77,7 @@ class LLMConfig:
 
     # Ollama (local)
     ollama_base_url: str = "http://localhost:11434"
-    ollama_default_model: str = "qwen2.5:7b"
+    ollama_default_model: str = "qwen2.5:0.5b"
 
     # Cloud models
     groq_model: str = "llama-3.3-70b-versatile"
@@ -176,7 +176,7 @@ def get_config() -> ErisiaConfig:
 
     # Ollama settings from env
     ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+    ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5:0.5b")
     prefer_local = os.environ.get("ERISIA_PREFER_LOCAL", "1").strip() == "1"
 
     # Feature flags from env

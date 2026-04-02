@@ -45,11 +45,14 @@ class MemoryManager:
         if not document:
             return None
         doc_id = doc_id or str(uuid.uuid4())
+        meta = metadata or {}
+        if not meta:
+            meta = {"timestamp": str(uuid.uuid4())}
         with self.lock:
             try:
                 self.collection.add(
                     documents=[document],
-                    metadatas=[metadata or {}],
+                    metadatas=[meta],
                     ids=[doc_id]
                 )
                 return doc_id

@@ -51,10 +51,10 @@ from erisia.erisia_cognition import GoalStack, JournalEngine, PassiveCognitionEn
 from erisia.erisia_episodic_memory import log_episode, get_recent_context, prune_and_reflect
 from erisia.erisia_world_state import WorldStateTracker
 from erisia.erisia_reasoning_engine import CausalReasoningEngine
-from .erisia_tool_definitions import base_tools
-from .erisia_daemon import DaemonManager
-from .erisia_system_tools import check_pc_health, launch_vscode, mute_unmute_volume, kill_process, clear_temp_files
-from .erisia_execution import inspect_core_architecture, execute_local_os_command, execute_secure_docker
+from erisia.erisia_tool_definitions import base_tools
+from erisia.erisia_daemon import DaemonManager
+from erisia.erisia_system_tools import check_pc_health, launch_vscode, mute_unmute_volume, kill_process, clear_temp_files, speak_text, mirofish_call
+from erisia.erisia_execution import inspect_core_architecture, execute_local_os_command, execute_secure_docker
 
 # --- PATHS & CONFIG ---
 _erisia_paths_cache: dict[str, Any] | None = None
@@ -215,7 +215,6 @@ def _ingest_audit_findings_into_goals(
 ENABLE_META_REVIEW = os.environ.get("ERISIA_ENABLE_META_REVIEW", "1").strip() == "1"
 PASSIVE_COGNITION_INTERVAL = int(os.environ.get("ERISIA_PASSIVE_COGNITION_INTERVAL", "90"))
 ENABLE_WORLD_STATE_HEAVY_DUMP = os.environ.get("ERISIA_ENABLE_HEAVY_UI_DUMP", "0").strip() == "1"
-TOOLS_COLLECTION_NAME = "erisia_tools"
 try:
     MAX_DYNAMIC_TOOLS_PER_QUERY = max(1, int(os.environ.get("ERISIA_MAX_DYNAMIC_TOOLS", "3")))
 except Exception:
@@ -512,6 +511,15 @@ _paths = _get_erisia_paths()
 memory_system = MemoryManager(Path(_paths["MEMORY_DIR"]))
 identity_system = IdentityManager(_paths["CONSCIOUSNESS_FILE"])
 daemon_system = DaemonManager()
+
+# --- OPTIONAL SERVICES (Voice, MCP sidecar) ---
+try:
+    from erisia.erisia_runtime_services import initialize_optional_services, start_optional_mcp_service
+    _optional_service_status = initialize_optional_services()
+    for status in _optional_service_status:
+        print(status)
+except Exception as e:
+    print(f"[RUNTIME SERVICES]: Failed to initialize optional services: {e}")
 
 def _write_heuristics_file(rules):
     """Atomically persist heuristic rules as a JSON list."""
@@ -1165,7 +1173,6 @@ THIRD_PARTY_PACKAGE_MAP = {
 }
 KNOWN_LOCAL_MODULES = {
     "erisia_core",
-    "erisia_body",
     "erisia_daemon",
     "erisia_cognition",
     "erisia_graph",
@@ -2578,6 +2585,16 @@ def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
             args.get("relation"),
             args.get("entity2"),
         )
+    if func_name == "speak_text":
+        return speak_text(args.get("text"))
+    if func_name == "mirofish_call":
+        return mirofish_call(
+            endpoint=args.get("endpoint"),
+            method=args.get("method", "GET"),
+            payload_json=args.get("payload_json"),
+            timeout_seconds=args.get("timeout_seconds", 60.0),
+            auto_start=args.get("auto_start", True),
+        )
     if func_name in runtime_dynamic_skills:
         try:
             return runtime_dynamic_skills[func_name](**args)
@@ -2907,11 +2924,11 @@ def erisia_complete_brain(user_input, system_injection=None):
                 "content": f"SYSTEM INJECTION (NOT FROM MASTER USER INPUT): {system_injection_text}"
             })
 
-        if ACTIVE_MISSION_QUEUE:
+        if daemon_system.active_mission_queue:
             mission_context = (
-                f"ACTIVE MISSION: {ACTIVE_MISSION_NAME}\n"
-                f"CURRENT REQUIRED STEP: {ACTIVE_MISSION_QUEUE[0]}\n"
-                f"REMAINING STEPS: {len(ACTIVE_MISSION_QUEUE)-1}\n"
+                f"ACTIVE MISSION: {daemon_system.active_mission_name}\n"
+                f"CURRENT REQUIRED STEP: {daemon_system.active_mission_queue[0]}\n"
+                f"REMAINING STEPS: {len(daemon_system.active_mission_queue)-1}\n"
                 "CRITICAL INSTRUCTION: You MUST ONLY focus on completing the CURRENT REQUIRED STEP using your tools. Do not skip ahead."
             )
             msg.append({"role": "system", "content": mission_context})

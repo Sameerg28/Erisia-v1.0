@@ -1,16 +1,16 @@
 {
   "tracker_mode": "win32_lightweight",
-  "captured_at_utc": "2026-03-30T14:54:02.433854+00:00",
+  "captured_at_utc": "2026-03-31T14:09:02.657104+00:00",
   "active_window": {
-    "hwnd": 132012,
+    "hwnd": 1312424,
     "title": "erisia_core.py - Erisia v0.1 - Visual Studio Code [Administrator]",
-    "pid": 8628
+    "pid": 10324
   },
   "cursor": {
-    "x": 1760,
-    "y": 378
+    "x": 1751,
+    "y": 365
   },
-  "last_window_change_utc": "2026-03-30T14:53:39.858322+00:00",
+  "last_window_change_utc": "2026-03-31T14:08:16.134800+00:00",
   "staleness_ms": 0,
   "heavy_dump": {
     "enabled": false,

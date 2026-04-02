@@ -332,5 +332,52 @@ base_tools = [
                 "required": ["event", "query_type"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "speak_text",
+            "description": "Convert text to speech and play it out loud. Use this when Erisia needs to verbally communicate with Master Sameer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to convert to speech and speak aloud."
+                    }
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mirofish_call",
+            "description": "Call MiroFish through Erisia orchestrator for simulation and forecasting workflows. Set ERISIA_MIROFISH_BASE_URL env var (default: http://localhost:8080).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "description": "MiroFish API endpoint path (must start with '/'). Example: '/health' or '/api/simulation/create'."
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["GET", "POST"],
+                        "description": "HTTP method. Defaults to GET."
+                    },
+                    "payload_json": {
+                        "type": "string",
+                        "description": "Optional JSON object string for POST body."
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Request timeout in seconds. Defaults to 60."
+                    }
+                },
+                "required": ["endpoint"]
+            }
+        }
     }
 ]
