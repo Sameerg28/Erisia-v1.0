@@ -57,6 +57,7 @@ from erisia.erisia_system_tools import check_pc_health, launch_vscode, mute_unmu
 from erisia.erisia_voice import listen_for_speech, get_voice_manager, VOICE_AVAILABLE
 from erisia.erisia_execution import inspect_core_architecture, execute_local_os_command, execute_secure_docker
 from erisia.erisia_tool_router import _parse_tool_arguments, _extract_json_objects, _extract_text_tool_calls, _execute_tool_call
+from erisia.brain_loop import ErisiaBrain, _run_brain_loop
 
 # --- PATHS & CONFIG ---
 _erisia_paths_cache: dict[str, Any] | None = None
@@ -3056,6 +3057,8 @@ if __name__ == "__main__":
     initialize_advanced_cognition()
 
     daemon_thread = None
+    brain_thread = None
+    brain_loop_instance = None
     episodic_thread = None
 
     world_state_tracker = WorldStateTracker(
@@ -3094,10 +3097,11 @@ if __name__ == "__main__":
         _planning_engine = None
         print(f"[Planning Engine: failed — {_exc}]")
     
-    # 2. Start the Subconscious Daemon Thread
-    daemon_thread = threading.Thread(target=background_daemon_loop, daemon=True)
-    daemon_thread.start()
-    print("[Subconscious Daemon is active and watching your Desktop...]")
+    # 2. Start the Erisia Brain Loop (replaces legacy background_daemon_loop)
+    brain_loop_instance = ErisiaBrain(core_module=sys.modules[__name__])
+    brain_thread = threading.Thread(target=_run_brain_loop, args=(sys.modules[__name__],), daemon=True)
+    brain_thread.start()
+    print("[Erisia Brain Loop: active — Observe-Think-Execute-Learn cycle running]")
 
     # 3. Start episodic memory maintenance (silent background daemon)
     episodic_thread = threading.Thread(target=episodic_memory_maintenance_loop, daemon=True)
@@ -3445,6 +3449,10 @@ if __name__ == "__main__":
         shutdown_event.set()
         if world_state_tracker:
             world_state_tracker.stop()
+        if brain_loop_instance:
+            brain_loop_instance.initiate_cryosleep()
+        if brain_thread and brain_thread.is_alive():
+            brain_thread.join(timeout=5)
         if daemon_thread and daemon_thread.is_alive():
             daemon_thread.join(timeout=5)
         if episodic_thread and episodic_thread.is_alive():

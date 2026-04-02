@@ -89,6 +89,7 @@ def _extract_text_tool_calls(content):
 
 def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
     """Centralized router for built-in and dynamic tools."""
+    # Import here to avoid circular dependency
     from erisia.erisia_core import (
         daemon_system,
         get_world_state,

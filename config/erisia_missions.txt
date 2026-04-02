@@ -1,0 +1,1 @@
+Your current primary directive is: Approve check_weather_mumbai.py (version 2). Write, test, and execute code in your sandbox to achieve this. 
