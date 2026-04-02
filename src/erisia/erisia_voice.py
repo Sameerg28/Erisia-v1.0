@@ -1,6 +1,10 @@
 import logging
 import asyncio
 import os
+import io
+import time
+import wave
+import struct
 from typing import Any
 
 logger = logging.getLogger("erisia_voice")
@@ -9,6 +13,7 @@ try:
     import edge_tts
     import pygame
     import speech_recognition as sr
+    import pyaudio
     from faster_whisper import WhisperModel
     VOICE_AVAILABLE = True
 except ImportError as e:
@@ -17,6 +22,7 @@ except ImportError as e:
     pygame = None
     sr = None
     WhisperModel = None
+    pyaudio = None
     logger.warning(f"Voice dependencies not available: {e}")
 
 
@@ -40,7 +46,7 @@ TOOL_SCHEMA = {
 
 
 class VoiceManager:
-    """SINGLE RESPONSIBILITY: Handle Erisia's physical speaking (TTS)."""
+    """SINGLE RESPONSIBILITY: Handle Erisia's physical speaking (TTS) and listening (STT)."""
     
     def __init__(self, tts_voice: str = "en-US-AriaNeural"):
         if not VOICE_AVAILABLE:
@@ -48,6 +54,8 @@ class VoiceManager:
         
         self.tts_voice = tts_voice
         self.audio_file = "erisia_speech_temp.mp3"
+        self._is_speaking = False
+        self._speak_ended_at = 0.0
         
         if VOICE_AVAILABLE and pygame is not None:
             pygame.mixer.init()
@@ -91,6 +99,7 @@ class VoiceManager:
         logger.info(f"Erisia speaking: {text}")
         
         try:
+            self._is_speaking = True
             asyncio.run(self._generate_audio(text))
             
             pg.mixer.music.load(self.audio_file)
@@ -102,34 +111,60 @@ class VoiceManager:
             pg.mixer.music.unload()
             if os.path.exists(self.audio_file):
                 os.remove(self.audio_file)
+            
+            self._is_speaking = False
+            self._speak_ended_at = time.time()
                 
-            return f"[VOICE]: Spoke '{text[:100]}...'"
+            return "[VOICE]: Spoken successfully."
         except Exception as e:
             logger.error(f"Failed to speak: {e}")
+            self._is_speaking = False
+            self._speak_ended_at = time.time()
             return f"[VOICE ERROR]: {e}"
 
-    def listen(self, timeout: int = 5) -> str:
-        """Listen for speech from microphone and transcribe it."""
+    def listen(self, timeout: int = 5, phrase_time_limit: int = 15) -> str:
+        """Listen for speech from microphone and transcribe it.
+        
+        Uses energy-based silence detection to automatically detect when
+        the user has finished speaking. Ignores audio if Erisia was just
+        speaking to prevent feedback loops.
+        """
         if not VOICE_AVAILABLE or not self.whisper_model or not self.recognizer or sr is None:
             return "[VOICE ERROR]: Speech recognition not available."
         
+        if self._is_speaking:
+            return "[VOICE]: Cannot listen while speaking."
+        
+        time_since_speak = time.time() - self._speak_ended_at
+        if time_since_speak < 2.0:
+            time.sleep(2.0 - time_since_speak)
+        
         try:
-            with sr.Microphone() as source:
+            with sr.Microphone(sample_rate=16000) as source:
                 logger.info("Listening...")
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                audio = self.recognizer.listen(source, timeout=timeout)
+                self.recognizer.energy_threshold = 400
+                self.recognizer.dynamic_energy_threshold = True
+                self.recognizer.dynamic_energy_adjustment_ratio = 1.5
+                self.recognizer.pause_threshold = 1.0
+                self.recognizer.non_speaking_duration = 0.8
+                self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
+                
+                try:
+                    audio = self.recognizer.listen(
+                        source,
+                        timeout=timeout,
+                        phrase_time_limit=phrase_time_limit
+                    )
+                except sr.WaitTimeoutError:
+                    return "[VOICE]: No speech detected within timeout."
             
-            audio_data = audio.get_wav_data()
-            temp_wav = "erisia_listen_temp.wav"
-            with open(temp_wav, "wb") as f:
-                f.write(audio_data)
-            
-            segments, _ = self.whisper_model.transcribe(temp_wav, beam_size=5)
+            segments, _ = self.whisper_model.transcribe(
+                io.BytesIO(audio.get_wav_data()),
+                beam_size=3,
+                language="en"
+            )
             text = "".join([seg.text for seg in segments]).strip()
             
-            if os.path.exists(temp_wav):
-                os.remove(temp_wav)
-                
             if text:
                 logger.info(f"Transcribed: {text}")
                 return text

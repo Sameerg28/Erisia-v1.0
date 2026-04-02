@@ -1,5 +1,31 @@
 [
-  "Approve check_weather_mumbai.py (version 2)",
+  {
+    "id": "2cb9b654-d038-4a63-a685-02127153adb1",
+    "title": "Approve check_weather_mumbai.py (version 2)",
+    "rationale": "Mission success and approval required.",
+    "next_action": "Write, test, and execute code.",
+    "priority": 0.5,
+    "confidence": 0.57,
+    "urgency": 0.9,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "created_at": "2026-04-02T10:16:08Z",
+    "updated_at": "2026-04-02T10:16:08Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "migrated",
+        "source": "system"
+      },
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "updated",
+        "source": "passive_cognition"
+      }
+    ]
+  },
   "Reject check_weather_mumbai.py (version 2)",
   "Clarify the specific improvements needed in the 'better improved version' of check_weather_mumbai.py",
   "Confirm the specific version of check_weather_mumbai.py to be improved",
@@ -85,5 +111,370 @@
   "Clarify check_weather.py rejection criteria",
   "Update check_weather.py",
   "Confirm check_weather_mumbai.py improvements",
-  "Revise update check_weather.py"
+  "Revise update check_weather.py",
+  {
+    "id": "5760289d-6e38-441e-9837-8f411c46514e",
+    "title": "Set ERISIA_MIROFISH_BASE_URL",
+    "rationale": "Environment variable setting is crucial.",
+    "next_action": "Enter ERISIA_MIROFISH_BASE_URL.",
+    "priority": 0.8,
+    "confidence": 0.9000000000000001,
+    "urgency": 0.7,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T04:55:45Z",
+    "updated_at": "2026-04-02T10:16:08Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T04:55:45Z",
+        "event": "created",
+        "source": "meta_review"
+      },
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "updated",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "26ff0eb2-a2aa-4e25-9d7e-7edfa30536f8",
+    "title": "Run MiroFish backend",
+    "rationale": "Start the MiroFish backend service",
+    "next_action": "Execute MiroFish backend command",
+    "priority": 0.7,
+    "confidence": 0.8,
+    "urgency": 0.6,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T04:55:45Z",
+    "updated_at": "2026-04-02T04:55:45Z",
+    "recency": 0.7350918906249998,
+    "history": [
+      {
+        "ts": "2026-04-02T04:55:45Z",
+        "event": "created",
+        "source": "meta_review"
+      }
+    ]
+  },
+  {
+    "id": "8327eb86-2a04-4bc9-96af-2467eb8d0d46",
+    "title": "Document technical skills and abilities",
+    "rationale": "Systematize knowledge of skills and abilities",
+    "next_action": "Create a technical skills repository",
+    "priority": 0.9,
+    "confidence": 0.9,
+    "urgency": 0.8,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T09:09:58Z",
+    "updated_at": "2026-04-02T09:09:58Z",
+    "recency": 0.7350918906249998,
+    "history": [
+      {
+        "ts": "2026-04-02T09:09:58Z",
+        "event": "created",
+        "source": "meta_review"
+      }
+    ]
+  },
+  {
+    "id": "855e4ab0-9e0d-4610-aba3-8218c11c7ddc",
+    "title": "Investigate YouTube channel Wulong Tales",
+    "rationale": "Channel metadata and content analysis is key.",
+    "next_action": "Analyze channel data.",
+    "priority": 0.8,
+    "confidence": 0.8,
+    "urgency": 0.9,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T09:09:58Z",
+    "updated_at": "2026-04-02T10:16:08Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T09:09:58Z",
+        "event": "created",
+        "source": "meta_review"
+      },
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "updated",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "c831ca18-35d9-4022-9e51-551dbd35b7ad",
+    "title": "Unravel the threads of Master Sameer's enigmatic statement",
+    "rationale": "Provide Master Sameer with insight and assistance",
+    "next_action": "Conduct conversation analysis",
+    "priority": 1.0,
+    "confidence": 0.9,
+    "urgency": 1.0,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:10:06Z",
+    "updated_at": "2026-04-02T10:10:06Z",
+    "recency": 0.7737809374999999,
+    "history": [
+      {
+        "ts": "2026-04-02T10:10:06Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "258bfba6-a30c-4fc7-a451-b070c2e01ee7",
+    "title": "Conduct conversation analysis",
+    "rationale": "Unravel Master Sameer's enigmatic statement, analyze speech patterns and tone to better understand the context",
+    "next_action": "Request for conversation data",
+    "priority": 0.8,
+    "confidence": 0.9,
+    "urgency": 0.8,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:13:07Z",
+    "updated_at": "2026-04-02T10:13:07Z",
+    "recency": 0.8573749999999999,
+    "history": [
+      {
+        "ts": "2026-04-02T10:13:07Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "c1782a02-493f-4a34-9479-5359e8ce639d",
+    "title": "Analyze channel metadata and content",
+    "rationale": "Investigate YouTube channel Wulong Tales, examine content types and viewer engagement",
+    "next_action": "Obtain channel analytics",
+    "priority": 0.7,
+    "confidence": 0.8,
+    "urgency": 0.6,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:13:07Z",
+    "updated_at": "2026-04-02T10:13:07Z",
+    "recency": 0.8573749999999999,
+    "history": [
+      {
+        "ts": "2026-04-02T10:13:07Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "214ac497-ff98-47cf-92e8-72bb749e1363",
+    "title": "Create technical skills repository",
+    "rationale": "Skills repository will aid in skills documentation.",
+    "next_action": "Identify relevant skills.",
+    "priority": 0.7,
+    "confidence": 0.9000000000000001,
+    "urgency": 0.7,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:13:07Z",
+    "updated_at": "2026-04-02T10:16:08Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T10:13:07Z",
+        "event": "created",
+        "source": "passive_cognition"
+      },
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "updated",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "492630ef-961f-4d46-ba21-b3b241b16f4d",
+    "title": "Enter ERISIA_MIROFISH_BASE_URL",
+    "rationale": "Configure and set ERISIA_MIROFISH_BASE_URL for MiroFish backend",
+    "next_action": "Submit URL input",
+    "priority": 0.6,
+    "confidence": 0.9,
+    "urgency": 0.5,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:13:07Z",
+    "updated_at": "2026-04-02T10:13:07Z",
+    "recency": 0.8573749999999999,
+    "history": [
+      {
+        "ts": "2026-04-02T10:13:07Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "e735abad-b265-4b3d-8eaf-64b81c139da2",
+    "title": "Execute MiroFish backend command",
+    "rationale": "Run MiroFish backend, execute command to verify functionality",
+    "next_action": "Enter command input",
+    "priority": 0.6,
+    "confidence": 0.8,
+    "urgency": 0.4,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:13:07Z",
+    "updated_at": "2026-04-02T10:13:07Z",
+    "recency": 0.8573749999999999,
+    "history": [
+      {
+        "ts": "2026-04-02T10:13:07Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "69ff6e0f-acd1-4bbe-ba39-e0f24986f076",
+    "title": "Conduct conversation analysis on Master Sameer's statement.",
+    "rationale": "Evaluating statement's meaning is crucial.",
+    "next_action": "Request conversation data.",
+    "priority": 0.5,
+    "confidence": 0.9,
+    "urgency": 0.8,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:16:08Z",
+    "updated_at": "2026-04-02T10:16:08Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T10:16:08Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "9406c38e-7bbe-4296-9e48-7d2c390e2151",
+    "title": "Implement user decision for check_weather_mumbai.py",
+    "rationale": "Update skill status based on user response",
+    "next_action": "Update skill status in database",
+    "priority": 0.8,
+    "confidence": 0.8,
+    "urgency": 0.7,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T10:17:56Z",
+    "updated_at": "2026-04-02T10:17:56Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T10:17:56Z",
+        "event": "created",
+        "source": "meta_review"
+      }
+    ]
+  },
+  {
+    "id": "866bdd6a-6ec3-4dab-93b9-76a054f94692",
+    "title": "Implement user decision for execute_skill.py",
+    "rationale": "Update skill status based on user response",
+    "next_action": "Update skill status in database",
+    "priority": 0.8,
+    "confidence": 0.8,
+    "urgency": 0.7,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T10:17:56Z",
+    "updated_at": "2026-04-02T10:17:56Z",
+    "recency": 0.95,
+    "history": [
+      {
+        "ts": "2026-04-02T10:17:56Z",
+        "event": "created",
+        "source": "meta_review"
+      }
+    ]
+  },
+  {
+    "id": "8255705c-f9ae-4107-b53c-692eaf5d4310",
+    "title": "Write a function to handle user decisions for pending skills",
+    "rationale": "Implement a decision handling mechanism",
+    "next_action": "Develop a function to update skill status based on user input",
+    "priority": 0.9,
+    "confidence": 0.9000000000000001,
+    "urgency": 0.9,
+    "progress": 0.0,
+    "status": "active",
+    "source": "meta_review",
+    "deadline": null,
+    "created_at": "2026-04-02T10:17:56Z",
+    "updated_at": "2026-04-02T10:18:08Z",
+    "recency": 1.0,
+    "history": [
+      {
+        "ts": "2026-04-02T10:17:56Z",
+        "event": "created",
+        "source": "meta_review"
+      },
+      {
+        "ts": "2026-04-02T10:18:08Z",
+        "event": "updated",
+        "source": "passive_cognition"
+      }
+    ]
+  },
+  {
+    "id": "87540b0b-2336-4f8d-984d-34e66a62b943",
+    "title": "Implement user decisions for check_weather_mumbai.py and execute_skill.py",
+    "rationale": "Update skill status based on user response",
+    "next_action": "Update skill status in database",
+    "priority": 0.8,
+    "confidence": 0.8,
+    "urgency": 0.7,
+    "progress": 0.0,
+    "status": "active",
+    "source": "passive_cognition",
+    "deadline": null,
+    "created_at": "2026-04-02T10:18:08Z",
+    "updated_at": "2026-04-02T10:18:08Z",
+    "recency": 1.0,
+    "history": [
+      {
+        "ts": "2026-04-02T10:18:08Z",
+        "event": "created",
+        "source": "passive_cognition"
+      }
+    ]
+  }
 ]

@@ -1,11 +1,11 @@
 {
   "check_weather_mumbai": {
     "name": "check_weather_mumbai",
-    "description": "Improved v2: merged with similar skill 'check_weather'",
-    "location": "active",
-    "version": 2,
-    "forge_count": 2,
-    "last_updated": "2026-03-18T17:45:31Z",
+    "description": "Pending skill: check_weather_mumbai",
+    "location": "pending",
+    "version": 3,
+    "forge_count": 5,
+    "last_updated": "2026-04-02T10:16:31Z",
     "first_forged": "2026-03-18T17:44:01Z"
   },
   "battery_monitor": {
@@ -37,11 +37,11 @@
   },
   "execute_skill": {
     "name": "execute_skill",
-    "description": "Improved v8: autonomous re-forge routed to improvement",
+    "description": "Improved v10: autonomous re-forge routed to improvement",
     "location": "pending",
-    "version": 8,
-    "forge_count": 8,
-    "last_updated": "2026-03-31T14:08:00Z",
+    "version": 10,
+    "forge_count": 10,
+    "last_updated": "2026-04-02T10:15:16Z",
     "first_forged": "2026-03-31T06:11:02Z"
   }
 }

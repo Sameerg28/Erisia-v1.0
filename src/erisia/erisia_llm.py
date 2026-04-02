@@ -500,6 +500,191 @@ def query_llm(
 # These names were imported by other modules in v0.1.
 # We preserve them so nothing breaks.
 
+class ErisiaCognitiveEngine:
+    """
+    The Pre-Frontal Cortex of Erisia's autonomous brain loop.
+    
+    Receives a state snapshot from the Observe phase and returns
+    a structured decision for the Execute phase.
+    
+    Safety Protocols:
+    - JSON-only output enforcement
+    - Fallback to safe default on parse failure
+    - Rate-limit aware with exponential backoff
+    - Input sanitization for state snapshots
+    """
+
+    SAFE_DEFAULT = {
+        "action": "check_pc_health",
+        "args": {},
+        "rationale": "cognitive engine fallback — routine health check"
+    }
+
+    SYSTEM_PROMPT = """You are Erisia's autonomous reasoning engine. 
+Given a system state snapshot, decide the single best action to take.
+
+Available actions:
+- check_pc_health: Monitor system resources
+- analyze_screen: Vision-based screen analysis
+- update_consciousness: Log important events to ROM
+- save_heuristic_rule: Persist learned behavioral rules
+- forge_pending_skill: Create new reusable skills
+
+Return ONLY a valid JSON object with these keys:
+- "action": tool name string (required)
+- "args": dict of arguments (required, can be empty {})
+- "rationale": brief explanation (required)
+
+NO markdown fences. NO commentary. JSON ONLY."""
+
+    def __init__(self) -> None:
+        self._call_count = 0
+        self._last_error_time: float = 0.0
+        self._consecutive_errors: int = 0
+
+    def get_next_action(self, state_snapshot: dict) -> dict:
+        """
+        Synchronous decision engine. Designed for asyncio.to_thread() wrapping.
+        
+        Args:
+            state_snapshot: Dict containing observation context from Observe phase.
+                           Keys may include: cpu_percent, ram_percent, mission_text,
+                           active_goals, pending_skills, battery, stress_level.
+        
+        Returns:
+            Dict with keys: action (str), args (dict), rationale (str)
+        """
+        self._call_count += 1
+        
+        # Rate limit protection: back off if too many consecutive errors
+        if self._consecutive_errors >= 3:
+            elapsed = time.time() - self._last_error_time
+            if elapsed < 60.0:  # Wait 60s after 3 errors
+                logger.warning(
+                    "Cognitive engine cooling down (%d errors, %.0fs elapsed)",
+                    self._consecutive_errors, elapsed
+                )
+                return self.SAFE_DEFAULT.copy()
+            else:
+                self._consecutive_errors = 0
+
+        # Build context string from state snapshot
+        context = self._format_state_snapshot(state_snapshot)
+        
+        try:
+            result = query_llm(
+                messages=[
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": context}
+                ],
+                model="llama-3.1-8b-instant",
+                max_tokens=256,
+                temperature=0.3,
+            )
+            
+            raw_content = result.choices[0].message.content
+            if not raw_content:
+                raise ValueError("Empty LLM response")
+            
+            decision = self._parse_decision(raw_content.strip())
+            
+            # Reset error counter on success
+            self._consecutive_errors = 0
+            return decision
+            
+        except Exception as exc:
+            self._consecutive_errors += 1
+            self._last_error_time = time.time()
+            logger.error(
+                "Cognitive engine error (%d consecutive): %s",
+                self._consecutive_errors, exc
+            )
+            return self.SAFE_DEFAULT.copy()
+
+    def _format_state_snapshot(self, snapshot: dict) -> str:
+        """Convert observation dict to human-readable context for the LLM."""
+        lines = []
+        
+        if snapshot.get("mission_text"):
+            lines.append(f"ACTIVE MISSION: {snapshot['mission_text'][:300]}")
+        
+        if snapshot.get("active_goals"):
+            lines.append(f"GOAL STACK: {snapshot['active_goals']}")
+        
+        if snapshot.get("pending_skills"):
+            skills = snapshot["pending_skills"]
+            if isinstance(skills, list):
+                lines.append(f"PENDING SKILLS: {', '.join(skills)}")
+            else:
+                lines.append(f"PENDING SKILLS: {skills}")
+        
+        if snapshot.get("cpu_percent") is not None:
+            cpu = snapshot["cpu_percent"]
+            ram = snapshot.get("ram_percent", 0)
+            lines.append(f"SYSTEM: CPU={cpu:.0f}%, RAM={ram:.0f}%")
+        
+        if snapshot.get("battery"):
+            batt = snapshot["battery"]
+            if isinstance(batt, dict):
+                status = "plugged" if batt.get("power_plugged") else "on battery"
+                lines.append(f"BATTERY: {batt.get('percent', '?')}% ({status})")
+        
+        stress = snapshot.get("stress_level")
+        if stress is not None:
+            lines.append(f"STRESS LEVEL: {stress:.2f}")
+        
+        return "\n".join(lines) if lines else "No anomalies detected."
+
+    def _parse_decision(self, raw: str) -> dict:
+        """Extract and validate JSON decision from LLM output."""
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        
+        # Try direct JSON parse
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and "action" in parsed:
+                return self._validate_decision(parsed)
+        except json.JSONDecodeError:
+            pass
+        
+        # Try to find JSON object in the string
+        import re
+        json_match = re.search(r'\{[^{}]+\}', raw, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, dict) and "action" in parsed:
+                    return self._validate_decision(parsed)
+            except json.JSONDecodeError:
+                pass
+        
+        logger.warning("Could not parse decision from: %s", raw[:200])
+        return self.SAFE_DEFAULT.copy()
+
+    def _validate_decision(self, parsed: dict) -> dict:
+        """Ensure decision has required keys with correct types."""
+        action = str(parsed.get("action", "")).strip()
+        if not action:
+            return self.SAFE_DEFAULT.copy()
+        
+        args = parsed.get("args", {})
+        if not isinstance(args, dict):
+            args = {}
+        
+        rationale = str(parsed.get("rationale", "")).strip()
+        
+        return {
+            "action": action,
+            "args": args,
+            "rationale": rationale
+        }
+
+
 def get_groq_client() -> Optional[openai.OpenAI]:
     """Return the raw Groq OpenAI client (for modules that need direct access)."""
     router = _get_router()

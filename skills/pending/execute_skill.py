@@ -1,50 +1,62 @@
-# Erisia Skill - execute_skill v8
-# Improved from v7: autonomous re-forge routed to improvement
+# Erisia Skill - execute_skill v10
+# Improved from v9: autonomous re-forge routed to improvement
 # Location before improvement: pending
 
+import requests
+
 TOOL_SCHEMA = {
-    "location": {"type": "object"},
-    "current": {"type": "object"}
+    "name": "check_weather_mumbai",
+    "description": "Retrieves and displays the current weather in Mumbai using the weatherapi.com API.",
+    "parameters": {
+        "api_key": {"type": "str", "required": True},
+        "city": {"type": "str", "default": "Mumbai"},
+        "units": {"type": "str", "default": "metric"}
+    },
+    "returns": "A descriptive string containing the current weather conditions"
 }
 
 def execute_skill(**kwargs):
     """
-    This function executes the skill to reject the check_weather.py script based on the given weather data.
+    Retrieves and displays the current weather in Mumbai using the weatherapi.com API.
+
+    Args:
+        **kwargs: Keyword arguments
+            - api_key (str): The API key from weatherapi.com
+            - city (str): The city name (default: Mumbai)
+            - units (str): The unit system (default: metric)
+
+    Returns:
+        str: A descriptive string containing the current weather conditions
     """
+    api_key = kwargs.get('api_key')
+    city = kwargs.get('city', 'Mumbai')
+    units = kwargs.get('units', 'metric')
+
     try:
-        location = kwargs.get("location")
-        current = kwargs.get("current")
-        
-        # Check if the location is valid
-        if not location or not isinstance(location, dict):
-            return "Error: Invalid location data"
-        
-        # Check if the current weather data is valid
-        if not current or not isinstance(current, dict):
-            return "Error: Invalid current weather data"
-        
-        # Extract the temperature and condition from the current weather data
-        temp_c = current.get("temp_c")
-        condition = current.get("condition")
-        
-        # Check if the temperature and condition are valid
-        if temp_c is None or condition is None:
-            return "Error: Invalid temperature or condition data"
-        
-        # Reject the check_weather.py script if the temperature is above 20°C and the condition is sunny
-        if temp_c > 20 and condition.get("text") == "Sunny":
-            return "Rejecting check_weather.py script due to high temperature and sunny condition"
-        else:
-            return "check_weather.py script is valid"
-    
-    except Exception as e:
-        return f"Error: {str(e)}"
+        response = requests.get(f'http://api.weatherapi.com/v1/current.json?key={api_key}&q={city}')
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as errh:
+        return f"HTTP Error: {errh}"
+    except requests.exceptions.ConnectionError as errc:
+        return f"Error Connecting: {errc}"
+    except requests.exceptions.Timeout as errt:
+        return f"Timeout Error: {errt}"
+    except requests.exceptions.RequestException as err:
+        return f"Something went wrong: {err}"
 
-# Example usage:
-weather_data = {
-    'location': {'name': "N'amtic", 'region': 'Chiapas', 'country': 'Mexico', 'lat': 16.9634, 'lon': -92.5835, 'tz_id': 'America/Mexico_City', 'localtime_epoch': 1774966072, 'localtime': '2026-03-31 08:07'},
-    'current': {'last_updated_epoch': 1774965600, 'last_updated': '2026-03-31 08:00', 'temp_c': 15.7, 'temp_f': 60.3, 'is_day': 1, 'condition': {'text': 'Sunny', 'icon': '//cdn.weatherapi.com/weather/64x64/day/113.png', 'code': 1000}, 'wind_mph': 2.2, 'wind_kph': 3.6, 'wind_degree': 124, 'wind_dir': 'SE', 'pressure_mb': 1019.0, 'pressure_in': 30.08, 'precip_mm': 0.0, 'precip_in': 0.0, 'humidity': 70, 'cloud': 12, 'feelslike_c': 15.9, 'feelslike_f': 60.5, 'windchill_c': 15.9, 'windchill_f': 60.5, 'heatindex_c': 15.7, 'heatindex_f': 60.3, 'dewpoint_c': 9.7, 'dewpoint_f': 49.4, 'vis_km': 10.0, 'vis_miles': 6.0, 'uv': 2.2, 'gust_mph': 6.7, 'gust_kph': 10.8}
-}
+    data = response.json()
 
-result = execute_skill(**weather_data)
-print(result)
+    try:
+        current_weather = data['current']
+        condition = current_weather['condition']
+        temperature = current_weather['temp_c'] if units == 'metric' else current_weather['temp_f']
+        humidity = current_weather['humidity']
+        wind_speed = current_weather['wind_kph'] if units == 'metric' else current_weather['wind_mph']
+
+        return f"Weather in {city}: {condition['text']}, Temperature: {temperature}°{units[:1].upper()}, Humidity: {humidity}%, Wind Speed: {wind_speed} {units[:3].upper()}"
+    except KeyError as e:
+        return f"Invalid response: {e}"
+
+# Example usage
+api_key = "YOUR_API_KEY_HERE"
+print(execute_skill(api_key=api_key))
