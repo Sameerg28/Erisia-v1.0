@@ -55,6 +55,6 @@ A background processing layer that handles tasks while the main interface is idl
 
  * Phase 4: Achieving recursive self-coding cycles via the Skill Forge to evolve the core architecture.
 
-Primary User: Master Sameer
+Primary User: Sameer
 > "The goal is not to mimic intelligence, but to manifest it." — Erisia v1.0
 > 
