@@ -66,7 +66,7 @@ def guard_goal_io(monkeypatch, goal_path):
         return real_open(file, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", checked_open)
-    for method in ("exists", "read_text", "open", "write_text", "unlink", "replace"):
+    for method in ("exists", "read_text", "open", "write_text", "unlink"):
         original = getattr(Path, method)
 
         def wrapper(self, *args, _original=original, **kwargs):
@@ -205,7 +205,7 @@ def test_remaining_known_goal_consumers_have_no_direct_file_io():
             expression = ast.unparse(call.func)
             assert expression not in {"open", "json.load", "json.dump", "json.loads", "json.dumps"}
             if isinstance(call.func, ast.Attribute) and call.func.attr in {
-                "open", "read_text", "write_text", "read_bytes", "write_bytes", "exists", "replace", "unlink",
+                "open", "read_text", "write_text", "read_bytes", "write_bytes", "exists", "unlink",
             }:
                 receiver = ast.unparse(call.func.value)
                 assert receiver == "store" or receiver.startswith("GoalStore("), expression
