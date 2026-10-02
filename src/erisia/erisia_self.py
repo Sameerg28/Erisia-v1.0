@@ -1031,10 +1031,10 @@ class IdentityLayer:
 
     def _read_goal_stack_records(self) -> list[dict[str, Any]]:
         path = self._resolve_goal_stack_path()
-        if not path.exists():
-            return []
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            from erisia.erisia_goal_store import load_goals_raw
+
+            raw = load_goals_raw(path)
         except Exception as exc:
             self._logger.debug("Unable to parse goal stack for identity analytics: %s", exc)
             return []

@@ -258,13 +258,11 @@ class GoalStack:
         return removed
 
     def _load(self):
-        if not os.path.exists(self.path):
-            return
+        # Sole file reader: GoalStore.load_goals_raw (compatibility-preserving).
         try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                self.goals = data
+            from erisia.erisia_goal_store import load_goals_raw
+
+            self.goals = load_goals_raw(self.path)
             self._refresh_recently_completed()
         except Exception as e:
             print(f"[GOAL STACK WARNING]: Failed to load goal stack. Error: {e}")
@@ -272,10 +270,12 @@ class GoalStack:
             self._recently_completed = {}
 
     def _save(self):
+        # Sole file writer: GoalStore.save_goals_raw (atomic, path-locked).
         try:
+            from erisia.erisia_goal_store import save_goals_raw
+
             self._refresh_recently_completed()
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(self.goals, f, indent=2)
+            save_goals_raw(self.path, self.goals)
         except Exception as e:
             print(f"[GOAL STACK WARNING]: Failed to save goal stack. Error: {e}")
 

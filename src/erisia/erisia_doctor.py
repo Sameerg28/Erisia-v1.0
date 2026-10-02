@@ -121,13 +121,16 @@ def _check_graph_memory(base_dir: Path) -> dict:
 
 
 def _check_goal_stack(base_dir: Path) -> dict:
-    """Check the goal stack."""
+    """Check the goal stack via GoalStore reader."""
     gs_file = base_dir / "data" / "erisia_goal_stack.json"
-    if not gs_file.exists():
+    from erisia.erisia_goal_store import GoalStore
+
+    store = GoalStore(gs_file)
+    if not store.exists():
         return {"name": "Goal Stack", "status": "empty", "display": "no goals"}
     try:
-        data = json.loads(gs_file.read_text(encoding="utf-8"))
-        count = len(data) if isinstance(data, list) else len(data.get("goals", []))
+        data = store.load()
+        count = len(data)
         return {"name": "Goal Stack", "status": "ok", "display": f"{count} active goals"}
     except Exception:
         return {"name": "Goal Stack", "status": "error", "display": "corrupted"}

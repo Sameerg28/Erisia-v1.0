@@ -239,14 +239,14 @@ class MorningBriefingGenerator:
 
     def _collect_active_goals(self) -> list[str]:
         """
-        Read erisia_goal_stack.json.
+        Read goals via GoalStore compatibility reader.
         Return top 5 active goals.
         """
         try:
-            if not GOAL_STACK_PATH.exists():
-                return []
-            raw = json.loads(GOAL_STACK_PATH.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
+            from erisia.erisia_goal_store import load_goals_raw
+
+            raw = load_goals_raw(GOAL_STACK_PATH)
+        except Exception:
             return []
 
         active = []

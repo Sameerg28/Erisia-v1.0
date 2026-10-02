@@ -89,23 +89,25 @@ def _extract_text_tool_calls(content):
 
 def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
     """Centralized router for built-in and dynamic tools."""
-    # Import here to avoid circular dependency
-    from erisia.erisia_core import (
-        daemon_system,
-        get_world_state,
-        analyze_screen,
-        reason_about_event,
-        update_consciousness,
-        save_heuristic_rule,
-        forge_new_skill,
-        forge_pending_skill,
-        approve_skill,
-        reject_skill,
-        graph_memory,
-        custom_skill_functions,
-        speak_text,
-        mirofish_call,
-    )
+    # Prefer injected runtime context over importing erisia_core (cycle reduction).
+    from erisia.erisia_runtime_context import resolve_tool_runtime_context
+
+    runtime = resolve_tool_runtime_context()
+    daemon_system = runtime.daemon_system
+    get_world_state = runtime.get_world_state
+    analyze_screen = runtime.analyze_screen
+    reason_about_event = runtime.reason_about_event
+    update_consciousness = runtime.update_consciousness
+    save_heuristic_rule = runtime.save_heuristic_rule
+    forge_new_skill = runtime.forge_new_skill
+    forge_pending_skill = runtime.forge_pending_skill
+    approve_skill = runtime.approve_skill
+    reject_skill = runtime.reject_skill
+    graph_memory = runtime.graph_memory
+    custom_skill_functions = runtime.custom_skill_functions or {}
+    speak_text = runtime.speak_text
+    mirofish_call = runtime.mirofish_call
+    manage_goal_stack = runtime.manage_goal_stack
 
     runtime_dynamic_skills = dynamic_skill_map if isinstance(dynamic_skill_map, dict) else custom_skill_functions
 
@@ -213,6 +215,13 @@ def _execute_tool_call(func_name, args, user_input, dynamic_skill_map=None):
         return approve_skill(target_skill)
     if func_name == "reject_skill":
         return reject_skill(args.get("skill_name"))
+    if func_name == "manage_goal_stack":
+        if manage_goal_stack is None:
+            return "[SYSTEM ERROR]: manage_goal_stack is not bound in runtime context."
+        return manage_goal_stack(
+            args.get("action"),
+            args.get("goal_text"),
+        )
     if func_name == "update_relational_memory":
         return graph_memory.add_memory_relation(
             args.get("entity1"),

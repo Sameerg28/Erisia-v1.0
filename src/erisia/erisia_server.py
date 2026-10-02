@@ -139,11 +139,9 @@ def create_app(query_handler: Optional[Any] = None) -> FastAPI | None:
     @app.get("/goals")
     def goals() -> dict[str, Any]:
         with contextlib.suppress(Exception):
-            from erisia.erisia_config import get_config
-            from erisia.erisia_cognition import GoalStack
+            from erisia.erisia_goal_store import get_goal_store
 
-            cfg = get_config()
-            gs = GoalStack(str(cfg.paths.goal_stack_file))
+            gs = get_goal_store().get_stack()
             focus = gs.focus_snapshot(limit=10)
             return {
                 "total": len(gs.goals),

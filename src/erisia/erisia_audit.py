@@ -350,15 +350,15 @@ class SelfAuditEngine:
 
     def _audit_goals(self) -> GoalAudit:
         """
-        Read erisia_goal_stack.json.
+        Read goals via GoalStore compatibility reader.
         Identify stale, abandoned, and completed goals.
         Find the most neglected active goal.
         """
         try:
-            raw = json.loads(
-                GOAL_STACK_PATH.read_text(encoding="utf-8")
-            )
-        except (OSError, json.JSONDecodeError):
+            from erisia.erisia_goal_store import load_goals_raw
+
+            raw = load_goals_raw(GOAL_STACK_PATH)
+        except Exception:
             raw = []
 
         now = datetime.now(UTC)

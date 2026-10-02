@@ -232,10 +232,8 @@ def create_mcp_server() -> Server[Any, Any] | None:
                 )]
 
             elif name == "erisia_goals":
-                from erisia.erisia_config import get_config
-                from erisia.erisia_cognition import GoalStack
-                cfg = get_config()
-                gs = GoalStack(str(cfg.paths.goal_stack_file))
+                from erisia.erisia_goal_store import get_goal_store
+                gs = get_goal_store().get_stack()
                 limit = arguments.get("limit", 5)
                 summary = gs.summary_text(limit=limit)
                 return [TextContent(type="text", text=summary)]
@@ -338,12 +336,8 @@ def create_mcp_server() -> Server[Any, Any] | None:
                 )
 
             if uri_text == "erisia://goals":
-                path = cfg.paths.goal_stack_file
-                return (
-                    path.read_text(encoding="utf-8")
-                    if path.exists()
-                    else "[]"
-                )
+                from erisia.erisia_goal_store import GoalStore
+                return GoalStore(cfg.paths.goal_stack_file).read_text()
 
             if uri_text == "erisia://skills":
                 reg_file = cfg.paths.skills_dir / "_registry.json"

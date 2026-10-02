@@ -7,8 +7,6 @@ import sys
 import time
 from pathlib import Path
 
-from .erisia_llm import ErisiaCognitiveEngine
-
 logger = logging.getLogger("erisia_brain")
 
 class ErisiaBrain:
@@ -166,19 +164,14 @@ class ErisiaBrain:
         return str(default) if default.exists() else None
 
     def _get_goal_stack_summary(self):
-        """Read goal stack file and return active goals summary."""
-        goal_stack_file = self._base_dir / "data" / "erisia_goal_stack.json"
-        if not goal_stack_file.exists():
-            return None
+        """Read goal stack via GoalStore and return active goals summary."""
         try:
-            with open(goal_stack_file, "r", encoding="utf-8") as f:
-                goals = json.load(f)
-            if isinstance(goals, list) and goals:
-                active = [g for g in goals if isinstance(g, dict)
-                          and str(g.get("status", "active")).lower() not in
-                          {"completed", "done", "abandoned", "cancelled"}]
-                if active:
-                    return f"{len(active)} active goals"
+            from erisia.erisia_goal_store import get_goal_store
+
+            store = get_goal_store()
+            active = store.list(active_only=True)
+            if active:
+                return f"{len(active)} active goals"
         except Exception:
             pass
         return None
@@ -428,13 +421,18 @@ class ErisiaBrain:
                 await asyncio.sleep(15)  # Backoff to prevent crash loops
 
 
-def _run_brain_loop(core_module=None):
+def _run_brain_loop(core_module=None, brain=None):
     """
     Thread entry point.
-    Creates an event loop and runs the brain heartbeat.
-    Designed to be launched from a threading.Thread.
+
+    Prefer an injected ErisiaBrain instance so the runtime owns exactly one
+    brain object. A new instance is created only when none is provided
+    (standalone ``python -m erisia.brain_loop``).
     """
-    brain = ErisiaBrain(core_module=core_module)
+    if brain is None:
+        brain = ErisiaBrain(core_module=core_module)
+    elif core_module is not None and getattr(brain, "core", None) is None:
+        brain.core = core_module
 
     # Wire OS kill signals to Cryosleep
     try:

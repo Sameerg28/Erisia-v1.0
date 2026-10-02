@@ -44,7 +44,6 @@ import contextlib
 
 # Global lock for skills cache (Thread-Safety)
 _skills_cache_lock = threading.Lock()
-from erisia.erisia_memory import MemoryManager
 from erisia.erisia_identity import IdentityManager
 from erisia.erisia_graph import ErisiaGraphMemory
 from erisia.erisia_cognition import GoalStack, JournalEngine, PassiveCognitionEngine, _safe_json_parse
@@ -58,6 +57,10 @@ from erisia.erisia_voice import listen_for_speech, get_voice_manager, VOICE_AVAI
 from erisia.erisia_execution import inspect_core_architecture, execute_local_os_command, execute_secure_docker
 from erisia.erisia_tool_router import _parse_tool_arguments, _extract_json_objects, _extract_text_tool_calls, _execute_tool_call
 from erisia.brain_loop import ErisiaBrain, _run_brain_loop
+from erisia.erisia_goal_store import GoalStore, bind_goal_store, get_goal_store
+from erisia.erisia_memory_store import MemoryStore, bind_memory_store, get_memory_store
+from erisia.erisia_runtime_context import ToolRuntimeContext, bind_tool_runtime_context
+
 
 # --- PATHS & CONFIG ---
 _erisia_paths_cache: dict[str, Any] | None = None
@@ -429,8 +432,12 @@ def _env_float(name, default):
 WORLD_STATE_POLL_INTERVAL = _env_float("ERISIA_WORLD_STATE_POLL_INTERVAL", 1.5)
 WORLD_STATE_WRITE_INTERVAL = _env_float("ERISIA_WORLD_STATE_WRITE_INTERVAL", 1.0)
 
+# Set True by `__main__` voice boot; safe default for non-interactive callers.
+_voice_ready = False
+
 
 def _normalize_goal_items(raw):
+    """Extract title strings from mixed goal payloads (read-only normalize)."""
     goals = []
     if isinstance(raw, list):
         for item in raw:
@@ -450,28 +457,34 @@ def _normalize_goal_items(raw):
 
 
 def _load_subconscious_goal_stack():
-    with memory_lock:
-        goal_stack_file = _get_erisia_paths()["GOAL_STACK_FILE"]
-        if not os.path.exists(goal_stack_file):
-            return []
-        try:
-            with open(goal_stack_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            goals = _normalize_goal_items(data)
-            return goals or []
-        except Exception:
-            return []
+    """Legacy reader — active goal titles via GoalStore (no direct JSON I/O)."""
+    store = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"])
+    return store.list_titles(active_only=True)
 
 
 def _save_subconscious_goal_stack(goals):
-    safe_goals = [str(g).strip() for g in goals if str(g).strip()]
-    with memory_lock:
-        from contextlib import suppress
-        with suppress(Exception):
-            goal_stack_file = _get_erisia_paths()["GOAL_STACK_FILE"]
-            os.makedirs(os.path.dirname(goal_stack_file), exist_ok=True)
-            with open(goal_stack_file, "w", encoding="utf-8") as f:
-                json.dump(safe_goals, f, indent=2)
+    """
+    Legacy writer — MUST NOT flatten/overwrite goal_stack.json.
+
+    Ensures each title exists via GoalStore.add without discarding structured fields.
+    """
+    store = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"])
+    if not isinstance(goals, list):
+        return
+    existing = {t.lower() for t in store.list_titles(active_only=False)}
+    for item in goals:
+        title = item.strip() if isinstance(item, str) else None
+        if isinstance(item, dict):
+            for key in ("title", "goal", "text", "name"):
+                val = item.get(key)
+                if isinstance(val, str) and val.strip():
+                    title = val.strip()
+                    break
+        if not title:
+            continue
+        if title.lower() not in existing:
+            store.add(title, source="legacy_helper")
+            existing.add(title.lower())
 
 # ═══════════════════════════════════════════════════════════════════════
 # v0.2 UPGRADE: Centralized imports replace duplicated code
@@ -509,9 +522,10 @@ _event_bus.emit(EventType.SYSTEM_STARTUP, {
 graph_memory = ErisiaGraphMemory()
 causal_reasoning_engine = CausalReasoningEngine(graph_data=graph_memory.graph)
 
-# --- MEMORY SETUP ---
+# --- MEMORY SETUP (single Chroma path via MemoryStore) ---
 _paths = _get_erisia_paths()
-memory_system = MemoryManager(Path(_paths["MEMORY_DIR"]))
+memory_system = bind_memory_store(MemoryStore(memory_dir=_paths["MEMORY_DIR"]))
+_goal_store = bind_goal_store(GoalStore(_paths["GOAL_STACK_FILE"]))
 identity_system = IdentityManager(_paths["CONSCIOUSNESS_FILE"])
 daemon_system = DaemonManager()
 
@@ -918,25 +932,29 @@ def background_daemon_loop():
         shutdown_event.wait(60) # Sleeps for 60 seconds
 
 def _count_completed_goals() -> int:
-    """Count completed goals from the goal stack JSON."""
+    """Count completed goals from the goal stack via GoalStore."""
     try:
-        paths = _get_erisia_paths()
-        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
-        return sum(1 for goal in stack
-                   if isinstance(goal, dict)
-                   and str(goal.get("status", "")).lower() in {"completed", "done"})
+        stack = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"]).load()
+        return sum(
+            1
+            for goal in stack
+            if isinstance(goal, dict)
+            and str(goal.get("status", "")).lower() in {"completed", "done"}
+        )
     except Exception:
         return 0
 
 
 def _count_abandoned_goals() -> int:
-    """Count abandoned goals from the goal stack JSON."""
+    """Count abandoned goals from the goal stack via GoalStore."""
     try:
-        paths = _get_erisia_paths()
-        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
-        return sum(1 for goal in stack
-                   if isinstance(goal, dict)
-                   and str(goal.get("status", "")).lower() in {"abandoned", "cancelled"})
+        stack = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"]).load()
+        return sum(
+            1
+            for goal in stack
+            if isinstance(goal, dict)
+            and str(goal.get("status", "")).lower() in {"abandoned", "cancelled"}
+        )
     except Exception:
         return 0
 
@@ -945,13 +963,18 @@ def _count_stale_goals() -> int:
     """Count goals not updated in GOAL_STALE_DAYS."""
     try:
         paths = _get_erisia_paths()
-        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
+        stack = get_goal_store(paths["GOAL_STACK_FILE"]).load()
         now = datetime.datetime.now(datetime.UTC)
         stale = 0
         for goal in stack:
             if not isinstance(goal, dict):
                 continue
-            if str(goal.get("status", "active")).lower() in {"completed", "done", "abandoned", "cancelled"}:
+            if str(goal.get("status", "active")).lower() in {
+                "completed",
+                "done",
+                "abandoned",
+                "cancelled",
+            }:
                 continue
             last = goal.get("last_updated") or goal.get("updated_at") or goal.get("created_at")
             if not isinstance(last, str) or not last.strip():
@@ -970,10 +993,9 @@ def _count_stale_goals() -> int:
 
 
 def _count_total_goals() -> int:
-    """Count total goals ever stated in the goal stack."""
+    """Count total structured goals in the goal stack."""
     try:
-        paths = _get_erisia_paths()
-        stack = json.loads(paths["GOAL_STACK_PATH"].read_text(encoding="utf-8"))
+        stack = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"]).load()
         return len([goal for goal in stack if isinstance(goal, dict)])
     except Exception:
         return 0
@@ -996,47 +1018,48 @@ def _sync_identity_goal_consistency() -> None:
 
 
 def manage_goal_stack(action, goal_text=None):
-    """Manage the long-term subconscious goal queue."""
-    current_goals = _load_subconscious_goal_stack()
+    """Manage the long-term subconscious goal queue via GoalStore."""
+    store = get_goal_store(_get_erisia_paths()["GOAL_STACK_FILE"])
+    result = store.manage(action, goal_text)
     act = str(action or "").strip().lower()
-
-    if act == "view":
-        return ("[GOAL STACK]: " + " | ".join(f"{idx+1}. {g}" for idx, g in enumerate(current_goals))
-                if current_goals
-                else "[GOAL STACK]: No active goals.")
-
-    if act == "add":
+    if act == "add" and "Added ->" in result:
         cleaned = str(goal_text or "").strip()
-        if not cleaned:
-            return "[GOAL STACK]: goal_text is required to add."
-        current_goals.append(cleaned)
-        _save_subconscious_goal_stack(current_goals)
         _sync_identity_goal_consistency()
-        
-        # Emit Event
         _event_bus.emit(EventType.GOAL_PUSHED, {"goal": cleaned}, source="erisia_core")
-        
-        return f"[GOAL STACK]: Added -> {cleaned}"
-
-    if act == "complete":
-        if not current_goals:
-            return "[GOAL STACK]: No goals to complete."
-        completed = current_goals.pop(0)
-        _save_subconscious_goal_stack(current_goals)
+    elif act == "complete" and "Completed ->" in result:
+        completed = result.split("Completed ->", 1)[-1].strip()
         _sync_identity_goal_consistency()
-        
-        # Emit Event
         _event_bus.emit(EventType.GOAL_COMPLETED, {"goal": completed}, source="erisia_core")
-        
-        return f"[GOAL STACK]: Completed -> {completed}"
-
-    return "[GOAL STACK]: Invalid action. Use add, complete, or view."
+    return result
 
 
 # --- THE DYNAMIC NERVE CENTER ---
 custom_skill_functions = {}
 SUCCESS_MARKER_RE = re.compile(r"\[[^\]]*SUCCESS[^\]]*\]", re.IGNORECASE)
 ERROR_MARKER_RE = re.compile(r"\[[^\]]*ERROR[^\]]*\]", re.IGNORECASE)
+
+
+def bind_core_tool_runtime() -> ToolRuntimeContext:
+    """Inject core callables into the tool router (breaks hard core↔router import)."""
+    return bind_tool_runtime_context(
+        ToolRuntimeContext(
+            daemon_system=daemon_system,
+            get_world_state=get_world_state,
+            analyze_screen=analyze_screen,
+            reason_about_event=reason_about_event,
+            update_consciousness=update_consciousness,
+            save_heuristic_rule=save_heuristic_rule,
+            forge_new_skill=forge_new_skill,
+            forge_pending_skill=forge_pending_skill,
+            approve_skill=approve_skill,
+            reject_skill=reject_skill,
+            graph_memory=graph_memory,
+            custom_skill_functions=custom_skill_functions,
+            speak_text=speak_text,
+            mirofish_call=mirofish_call,
+            manage_goal_stack=manage_goal_stack,
+        )
+    )
 
 
 def _tool_response_has_success_marker(function_response):
@@ -1915,7 +1938,9 @@ def initialize_advanced_cognition():
     """Bootstraps passive cognition, goal stack, and journaling modules."""
     global goal_stack, journal_engine, passive_cognition_engine
     if goal_stack is None:
-        goal_stack = GoalStack(GOAL_STACK_FILE)
+        store = get_goal_store(GOAL_STACK_FILE)
+        goal_stack = store.get_stack()
+        store.bind_stack(goal_stack)
         if goal_stack:
             _purged = goal_stack.purge_corrupted_goals()
             if _purged > 0:
@@ -3049,11 +3074,19 @@ def episodic_memory_maintenance_loop():
         shutdown_event.wait(300)
 
 
+# Bind tool-router deps once all callables exist (cycle reduction).
+try:
+    bind_core_tool_runtime()
+except Exception as _bind_exc:
+    print(f"[RUNTIME CONTEXT WARNING]: Failed to bind tool runtime: {_bind_exc}")
+
+
 # --- IGNITION ---
 if __name__ == "__main__":
     os.system('cls' if os.name == 'nt' else 'clear')
     print("--- Erisia's Central Core Online ---")
 
+    bind_core_tool_runtime()
     initialize_advanced_cognition()
 
     daemon_thread = None
@@ -3097,9 +3130,16 @@ if __name__ == "__main__":
         _planning_engine = None
         print(f"[Planning Engine: failed — {_exc}]")
     
-    # 2. Start the Erisia Brain Loop (replaces legacy background_daemon_loop)
+    # 2. Start the Erisia Brain Loop (exactly one ErisiaBrain instance)
     brain_loop_instance = ErisiaBrain(core_module=sys.modules[__name__])
-    brain_thread = threading.Thread(target=_run_brain_loop, args=(sys.modules[__name__],), daemon=True)
+    brain_thread = threading.Thread(
+        target=_run_brain_loop,
+        kwargs={
+            "core_module": sys.modules[__name__],
+            "brain": brain_loop_instance,
+        },
+        daemon=True,
+    )
     brain_thread.start()
     print("[Erisia Brain Loop: active — Observe-Think-Execute-Learn cycle running]")
 
